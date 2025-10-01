@@ -8,8 +8,11 @@ Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
 Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+SQLite = "0aa819cd-b072-5ff4-a722-6bc24af294d9"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
 [compat]
+SQLite = "1.6.1"
 julia = "1.11.7"

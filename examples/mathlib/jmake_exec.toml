@@ -1,0 +1,30 @@
+[project]
+name = "mathlib_test"
+root = "/home/grim/Desktop/op/test_projects/mathlib"
+
+[cache]
+enabled = true
+directory = ".bridge_cache"
+
+[workflow]
+stages = ["discover_tools", "compile_to_ir", "link_ir", "optimize_ir", "create_executable"]
+parallel = true
+
+[paths]
+build = "build"
+source = "/home/grim/Desktop/op/test_projects/mathlib/tests"
+output = "julia"
+
+[compile]
+link_libraries = ["mathlib"]
+
+[target]
+opt_level = "O2"
+cpu = "generic"
+triple = ""
+lto = false
+
+[bridge]
+enable_learning = true
+auto_discover = true
+cache_tools = true

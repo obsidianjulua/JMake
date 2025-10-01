@@ -1,0 +1,36 @@
+[project]
+name = "mathlib"
+root = "/home/grim/Desktop/op/test_projects/mathlib"
+
+[cache]
+enabled = true
+directory = ".bridge_cache"
+
+[workflow]
+stages = ["discover_tools", "compile_to_ir", "link_ir", "optimize_ir", "create_library", "extract_symbols"]
+parallel = true
+
+[paths]
+build = "build"
+source = "/home/grim/Desktop/op/test_projects/mathlib/src"
+output = "julia"
+
+[compile]
+flags = ["-O3", "-fPIC"]
+include_dirs = ["/home/grim/Desktop/op/test_projects/mathlib/include"]
+link_libraries = ["m", "pthread"]
+
+    [compile.defines]
+    MATHLIB_VERSION = "1.0.0"
+    ENABLE_SIMD = "1"
+
+[target]
+opt_level = "O2"
+cpu = "generic"
+triple = ""
+lto = false
+
+[bridge]
+enable_learning = true
+auto_discover = true
+cache_tools = true

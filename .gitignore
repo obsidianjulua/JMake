@@ -52,3 +52,16 @@ examples/*/julia/*.json
 # Test artifacts
 test/build/
 test/julia/
+
+# ErrorLearning databases
+*.db
+!docs/*.db  # Allow example databases in docs if needed
+test_error_learning_*.db
+jmake_errors.db
+test_export_*.json
+
+# Live test artifacts
+examples/live_test/*.o
+examples/live_test/*.so
+examples/live_test/pthread_test
+examples/live_test/test_*

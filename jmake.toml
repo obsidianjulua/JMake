@@ -125,3 +125,25 @@ unifiedbridge_enabled = true # Use UnifiedBridge for command execution
 # Metadata sharing
 export_metadata = true
 metadata_format = "json"  # json, toml
+
+[learning]
+# Intelligent error correction with ErrorLearning.jl
+enabled = true                      # Enable error pattern learning
+auto_fix = true                     # Automatically apply high-confidence fixes
+max_retries = 3                     # Maximum auto-retry attempts
+confidence_threshold = 0.75         # Minimum confidence for auto-fix (0.0-1.0)
+error_db = "jmake_errors.db"       # Database file (per-project or global)
+use_embeddings = true               # Use BERT embeddings (requires EngineT)
+bootstrap_on_init = true            # Bootstrap with common error patterns
+share_knowledge = false             # Share learned patterns across projects
+
+# Error categorization
+track_error_types = [
+    "compiler_error",
+    "linker_error",
+    "llvm_error",
+    "optimization_failure",
+    "missing_header",
+    "undefined_symbol",
+    "syntax_error"
+]

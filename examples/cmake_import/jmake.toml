@@ -1,0 +1,29 @@
+[project]
+name = "mycoollib"
+root = "/home/grim/.julia/julia/JMake/examples/cmake_import"
+
+[cache]
+enabled = true
+directory = ".bridge_cache"
+
+[workflow]
+stages = ["discover_tools", "compile_to_ir", "link_ir", "optimize_ir", "create_library", "extract_symbols"]
+parallel = true
+
+[paths]
+build = "build"
+source = "src"
+output = "julia"
+
+[compile]
+
+[target]
+opt_level = "O2"
+cpu = "generic"
+triple = ""
+lto = false
+
+[bridge]
+enable_learning = true
+auto_discover = true
+cache_tools = true

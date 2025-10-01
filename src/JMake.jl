@@ -9,11 +9,13 @@ const VERSION = v"0.1.0"
 
 # Load all submodules in the correct order
 include("BuildBridge.jl")
+include("CMakeParser.jl")
 include("LLVMake.jl")
 include("JuliaWrapItUp.jl")
 
 # Re-export submodules
 using .BuildBridge
+using .CMakeParser
 using .LLVMake
 using .JuliaWrapItUp
 
@@ -22,7 +24,7 @@ using .JuliaWrapItUp
 include("Bridge_LLVM.jl")
 
 # Export submodules themselves
-export BuildBridge, LLVMake, JuliaWrapItUp
+export BuildBridge, CMakeParser, LLVMake, JuliaWrapItUp
 
 # Export key types from LLVMake
 export LLVMJuliaCompiler, CompilerConfig, TargetConfig
@@ -33,6 +35,9 @@ export BinaryWrapper, WrapperConfig, BinaryInfo
 # Export key functions from BuildBridge
 export execute, capture, find_executable, command_exists
 export discover_llvm_tools, compile_with_analysis
+
+# Export key functions from CMakeParser
+export parse_cmake_file, CMakeProject, CMakeTarget
 
 # Export key functions from LLVMake
 export compile_project
@@ -180,6 +185,54 @@ function discover_tools(config_file::String="jmake.toml")
 end
 
 """
+    import_cmake(cmake_file::String="CMakeLists.txt"; target::String="", output::String="jmake.toml")
+
+Import a CMake project and generate jmake.toml configuration.
+
+# Arguments
+- `cmake_file::String`: Path to CMakeLists.txt file
+- `target::String`: Specific target to import (empty = first target)
+- `output::String`: Output path for jmake.toml
+
+# Examples
+```julia
+# Import first target from CMake project
+JMake.import_cmake("path/to/CMakeLists.txt")
+
+# Import specific target
+JMake.import_cmake("opencv/CMakeLists.txt", target="opencv_core")
+```
+"""
+function import_cmake(cmake_file::String="CMakeLists.txt"; target::String="", output::String="jmake.toml")
+    println("📦 Importing CMake project: $cmake_file")
+
+    # Parse CMakeLists.txt
+    cmake_project = CMakeParser.parse_cmake_file(cmake_file)
+
+    println("✅ Found CMake project: $(cmake_project.project_name)")
+    println("   Targets: $(join(keys(cmake_project.targets), ", "))")
+
+    # Determine target
+    target_name = target
+    if isempty(target_name)
+        if isempty(cmake_project.targets)
+            error("No targets found in CMake project")
+        end
+        target_name = first(keys(cmake_project.targets))
+        println("   Using target: $target_name")
+    end
+
+    # Generate jmake.toml
+    CMakeParser.write_jmake_config(cmake_project, target_name, output)
+
+    println("🎉 CMake import complete!")
+    println("   Generated: $output")
+    println("   Run: JMake.compile(\"$output\")")
+
+    return cmake_project
+end
+
+"""
     info()
 
 Display information about the JMake build system.
@@ -195,6 +248,7 @@ function info()
 
     Components:
     • BuildBridge     - Simple command execution and tool discovery
+    • CMakeParser     - Import CMake projects without running CMake
     • LLVMake         - C++ source → Julia compiler
     • JuliaWrapItUp   - Binary → Julia wrapper generator
     • Bridge_LLVM     - Orchestrator integrating all components

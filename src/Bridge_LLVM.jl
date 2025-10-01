@@ -36,6 +36,7 @@ mutable struct BridgeCompilerConfig
     # Compilation settings
     compile_flags::Vector{String}
     defines::Dict{String,String}
+    link_libraries::Vector{String}
     walk_dependencies::Bool
     max_depth::Int
 
@@ -82,6 +83,7 @@ mutable struct BridgeCompilerConfig
             Dict{String,String}(),  # tools - populated later
             get(compile, "flags", String[]),
             get(compile, "defines", Dict{String,String}()),
+            get(compile, "link_libraries", String[]),
             get(compile, "walk_dependencies", true),
             get(compile, "max_depth", 10),
             get(target, "triple", ""),
@@ -371,6 +373,58 @@ function create_library(config::BridgeCompilerConfig, ir_file::String, lib_name:
 end
 
 """
+Create executable via BuildBridge
+"""
+function create_executable(config::BridgeCompilerConfig, ir_file::String, exe_name::String)
+    println("🔨 Creating executable...")
+
+    mkpath(config.output_dir)
+    exe_path = joinpath(config.output_dir, exe_name)
+
+    # Build command
+    cmd_args = ["-o", exe_path, ir_file]
+
+    if config.enable_lto
+        push!(cmd_args, "-flto")
+    end
+
+    # Add library search path (for locally built libs)
+    lib_dir = joinpath(config.project_root, "julia")
+    if isdir(lib_dir)
+        push!(cmd_args, "-L$lib_dir")
+        # Add rpath so executable can find the library at runtime
+        push!(cmd_args, "-Wl,-rpath,$lib_dir")
+    end
+
+    # Add link libraries
+    # Common system libraries
+    link_libs = ["-lm", "-lpthread"]
+    append!(cmd_args, link_libs)
+
+    # Add libraries from config
+    for lib in config.link_libraries
+        # If it's a custom library (like mathlib), add -l prefix
+        if !startswith(lib, "-")
+            push!(cmd_args, "-l$lib")
+        else
+            push!(cmd_args, lib)
+        end
+    end
+
+    (output, exitcode) = BuildBridge.execute("clang++", cmd_args)
+
+    if isfile(exe_path)
+        # Make executable
+        chmod(exe_path, 0o755)
+        println("  ✅ Created: $exe_path")
+        return exe_path
+    end
+
+    @warn "  ❌ Executable creation failed\n$output"
+    return nothing
+end
+
+"""
 Extract symbols from binary via BuildBridge
 """
 function extract_symbols(config::BridgeCompilerConfig, binary_path::String)
@@ -480,21 +534,26 @@ function compile_bridge_project(config::BridgeCompilerConfig)
         return nothing
     end
 
-    # Stage 6: Create library
-    lib_path = nothing
+    # Stage 6: Create library or executable
+    output_path = nothing
     if "create_library" in config.stages
-        lib_path = create_library(config, optimized_ir, config.project_name)
+        output_path = create_library(config, optimized_ir, config.project_name)
+        if isnothing(output_path)
+            println("❌ Library creation failed")
+            return nothing
+        end
+    elseif "create_executable" in config.stages
+        output_path = create_executable(config, optimized_ir, config.project_name)
+        if isnothing(output_path)
+            println("❌ Executable creation failed")
+            return nothing
+        end
     end
 
-    if isnothing(lib_path)
-        println("❌ Library creation failed")
-        return nothing
-    end
-
-    # Stage 7: Extract symbols
+    # Stage 7: Extract symbols (only for libraries)
     symbols = []
-    if "extract_symbols" in config.stages
-        symbols = extract_symbols(config, lib_path)
+    if "extract_symbols" in config.stages && !isnothing(output_path)
+        symbols = extract_symbols(config, output_path)
     end
 
     # Stage 8: Generate bindings
@@ -512,10 +571,14 @@ function compile_bridge_project(config::BridgeCompilerConfig)
     end
 
     println("\n🎉 Compilation complete!")
-    println("📦 Library: $lib_path")
-    println("🔧 Symbols: $(length(symbols))")
+    if "create_library" in config.stages
+        println("📦 Library: $output_path")
+        println("🔧 Symbols: $(length(symbols))")
+    elseif "create_executable" in config.stages
+        println("🔨 Executable: $output_path")
+    end
 
-    return lib_path
+    return output_path
 end
 
 """

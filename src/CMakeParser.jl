@@ -131,7 +131,8 @@ function parse_cmake_file(filepath::String)
         error("CMakeLists.txt not found: $filepath")
     end
 
-    root_dir = dirname(filepath)
+    # Get absolute path of the CMakeLists.txt directory
+    root_dir = dirname(abspath(filepath))
     project = CMakeProject(
         "",  # project_name
         "",  # cmake_minimum_required
@@ -450,13 +451,28 @@ function resolve_path(path::String, root_dir::String)
     # Handle CMake variables (basic support)
     path = replace(path, "\${CMAKE_CURRENT_SOURCE_DIR}" => root_dir)
     path = replace(path, "\${PROJECT_SOURCE_DIR}" => root_dir)
+    path = replace(path, "\$ENV{HOME}" => get(ENV, "HOME", ""))
 
-    # If relative, make absolute
-    if !isabspath(path)
-        path = joinpath(root_dir, path)
+    # If path is already absolute, return as-is
+    if isabspath(path)
+        return path
     end
 
-    return path
+    # If root_dir is empty or path starts with /, join carefully
+    if isempty(root_dir)
+        # Try to get absolute path from current directory
+        if startswith(path, "/")
+            return path
+        else
+            return abspath(path)
+        end
+    end
+
+    # Make relative path absolute by joining with root_dir
+    path = joinpath(root_dir, path)
+
+    # Normalize the path (remove . and ..)
+    return abspath(path)
 end
 
 """
@@ -532,6 +548,11 @@ function to_jmake_config(cmake_project::CMakeProject, target_name::String="")
         compile_config["defines"] = target.compile_definitions
     end
 
+    # Add link libraries if present (important for executables)
+    if !isempty(target.link_libraries)
+        compile_config["link_libraries"] = target.link_libraries
+    end
+
     config["compile"] = compile_config
 
     # [target]
@@ -550,15 +571,28 @@ function to_jmake_config(cmake_project::CMakeProject, target_name::String="")
     )
 
     # [workflow]
-    config["workflow"] = Dict{String,Any}(
-        "stages" => [
+    # Choose workflow stages based on target type
+    if target.type == :executable
+        stages = [
+            "discover_tools",
+            "compile_to_ir",
+            "link_ir",
+            "optimize_ir",
+            "create_executable"
+        ]
+    else
+        stages = [
             "discover_tools",
             "compile_to_ir",
             "link_ir",
             "optimize_ir",
             "create_library",
             "extract_symbols"
-        ],
+        ]
+    end
+
+    config["workflow"] = Dict{String,Any}(
+        "stages" => stages,
         "parallel" => true
     )
 

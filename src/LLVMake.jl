@@ -453,11 +453,32 @@ Filter functions based on include/exclude patterns
 function filter_functions(functions::Vector, config::CompilerConfig)
     filtered = []
 
+    # Default exclusions for production
+    default_excludes = [
+        r"^std::",           # C++ standard library
+        r"^__",              # Compiler internals
+        r"^operator",        # C++ operators
+        r"^_Z",              # Mangled names
+        r"::operator",       # Member operators
+        r"^decltype",        # Type deduction
+        r"^typename",        # Template typename
+    ]
+
     for func in functions
         func_name = func["name"]
 
-        # Check exclude patterns
-        excluded = any(pattern -> occursin(pattern, func_name), config.exclude_patterns)
+        # Skip empty names
+        if isempty(func_name)
+            continue
+        end
+
+        # Check default exclusions
+        excluded = any(pattern -> occursin(pattern, func_name), default_excludes)
+
+        # Check user exclude patterns
+        if !excluded
+            excluded = any(pattern -> occursin(pattern, func_name), config.exclude_patterns)
+        end
 
         # Check include patterns (if specified)
         if !isempty(config.include_patterns)

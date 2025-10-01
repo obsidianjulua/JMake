@@ -1,0 +1,39 @@
+# JMake LLVMake Configuration
+project_root = "."
+
+[paths]
+source = "src"           # C++ source directory
+output = "julia"         # Julia output directory
+build = "build"          # Build artifacts directory
+
+[llvm]
+# Leave empty to use system LLVM, or specify paths
+# root = "/path/to/llvm"  # Project-local LLVM installation
+# clang = "clang++-20"    # Specific clang version
+# config = "llvm-config-20"
+
+[target]
+triple = ""              # Target triple (empty = host)
+cpu = "generic"          # Target CPU: generic, native, haswell, etc.
+opt_level = "O2"         # Optimization: O0, O1, O2, O3, Os, Oz
+debug = false            # Include debug symbols
+lto = false              # Link-time optimization
+
+[compile]
+include_dirs = ["include"]
+
+[compile.defines]
+# NDEBUG = "1"
+# CUSTOM_FLAG = "value"
+
+[bindings]
+style = "simple"         # simple, advanced, cxxwrap
+exclude_patterns = ["^test_", "^internal_", ".*_impl$"]
+include_patterns = []    # If specified, only include matching functions
+
+[bindings.type_mappings]
+# Map C++ types to Julia types
+"std::string" = "String"
+"std::vector<double>" = "Vector{Float64}"
+"std::vector<float>" = "Vector{Float32}"
+"std::vector<int>" = "Vector{Int32}"

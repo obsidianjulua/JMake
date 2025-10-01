@@ -246,10 +246,25 @@ JMake compilation pipeline:
 
 ## Examples
 
-See the [docs/](docs/) directory for detailed examples:
+See the [examples/](examples/) directory for working examples:
 
+- **[simple_math](examples/simple_math/)** - Minimal C++ project (5 functions, fully tested ✅)
 - [BRIDGE_INTEGRATION.md](docs/BRIDGE_INTEGRATION.md) - Complete integration guide
-- Example projects coming soon!
+
+### Verified Test Results
+
+JMake has been tested and verified with a real C++ project:
+
+```julia
+# Compiled with: JMake.compile()
+✅ fast_sqrt(16.0) → 4.0
+✅ fast_sin(0.0) → 0.0
+✅ fast_pow(2.0, 3.0) → 8.0
+✅ add(5, 3) → 8
+✅ multiply(4, 7) → 28
+```
+
+All functions compiled successfully from C++ → LLVM IR → Shared Library → Julia!
 
 ## Requirements
 

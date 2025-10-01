@@ -41,12 +41,19 @@ JMake.info()
 JMake/
 ├── src/
 │   ├── JMake.jl              # Main module (entry point)
-│   ├── UnifiedBridge.jl      # Command wrapper with learning
+│   ├── BuildBridge.jl        # Command execution + error learning
+│   ├── ErrorLearning.jl      # SQLite-based error tracking
+│   ├── CMakeParser.jl        # CMake project import
 │   ├── LLVMake.jl            # C++ → Julia compiler
 │   ├── JuliaWrapItUp.jl      # Binary → Julia wrappers
 │   └── Bridge_LLVM.jl        # Orchestrator
 ├── examples/                  # Example projects
+│   ├── simple_math/          # Minimal C++ example
+│   └── cmake_import/         # CMake import example
 ├── docs/                      # Documentation
+│   ├── ERROR_LEARNING.md     # Error learning system
+│   ├── FEATURES_ROADMAP.md   # Feature roadmap
+│   └── BRIDGE_INTEGRATION.md # Integration guide
 ├── Project.toml               # Package metadata
 └── jmake.toml                 # Default configuration
 ```

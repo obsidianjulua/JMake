@@ -8,6 +8,8 @@ This directory contains example projects demonstrating JMake's capabilities.
 
 A minimal C++ project demonstrating basic JMake usage.
 
+**Status**: ✅ Fully tested and verified
+
 **What it does:**
 - Defines 5 simple C++ math functions
 - Compiles them to a Julia-callable library
@@ -154,6 +156,28 @@ Customize C++ to Julia type conversions:
 "std::string" = "String"
 "std::vector<double>" = "Vector{Float64}"
 "MyCustomType*" = "Ptr{MyCustomType}"
+```
+
+### 2. CMake Import (`cmake_import/`)
+
+Demonstrates importing existing CMake projects without running CMake.
+
+**Status**: ✅ Implemented
+
+**What it does:**
+- Parses CMakeLists.txt directly (no CMake execution)
+- Extracts sources, includes, flags, and dependencies
+- Generates jmake.toml configuration
+- Shows how to import specific targets
+
+**Try it:**
+```bash
+cd examples/cmake_import
+
+# Import CMake project
+julia --project=../.. -e 'using JMake; JMake.import_cmake("CMakeLists.txt")'
+
+# Generates jmake.toml ready for JMake.compile()
 ```
 
 ## Coming Soon

@@ -7,8 +7,9 @@ JMake is a unique build system that doesn't replace traditional build systems li
 ## Features
 
 - 🚀 **Single TOML Configuration** - No complex CMakeLists.txt or Makefiles
-- 🔍 **Auto-Discovery** - Automatically finds LLVM/Clang tools via UnifiedBridge
-- 🧠 **Adaptive Learning** - Learns optimal command patterns over time
+- 🔍 **Auto-Discovery** - Automatically finds LLVM/Clang tools via BuildBridge
+- 🧠 **Error Learning** - Learns from compilation errors to improve success rates
+- 📦 **CMake Import** - Import existing CMake projects without running CMake
 - 📦 **Dual Mode** - Compile C++ source OR wrap existing binaries
 - 🎯 **Type-Safe** - AST-based parsing for accurate type mapping
 - ⚡ **LLVM IR Pipeline** - Full control over optimization and linking
@@ -16,19 +17,24 @@ JMake is a unique build system that doesn't replace traditional build systems li
 
 ## Architecture
 
-JMake consists of four integrated components:
+JMake consists of five integrated components:
 
-1. **UnifiedBridge** - Universal bash command wrapper with adaptive learning
-2. **LLVMake** - C++ source → Julia compiler (Stage 1)
-3. **JuliaWrapItUp** - Binary → Julia wrapper generator (Stage 2)
-4. **Bridge_LLVM** - Orchestrator that integrates all components
+1. **BuildBridge** - Simple command execution and tool discovery with error learning
+2. **CMakeParser** - Import CMake projects without running CMake
+3. **LLVMake** - C++ source → Julia compiler (Stage 1)
+4. **JuliaWrapItUp** - Binary → Julia wrapper generator (Stage 2)
+5. **Bridge_LLVM** - Orchestrator that integrates all components
 
 ```
+CMakeLists.txt ──→ [CMakeParser] ──→ jmake.toml
+                                          ↓
 C++ Source ──→ [LLVMake] ──→ LLVM IR ──→ Shared Library ──→ Julia Bindings
                    ↓                           ↓
               AST Parse              [JuliaWrapItUp]
                                            ↓
 Binary/Library ─────────────────────→ Julia Wrappers
+           ↑
+    [BuildBridge] - Tool discovery, execution, error learning
 ```
 
 ## Installation
@@ -97,8 +103,8 @@ output = "julia"
 build = "build"
 
 [bridge]
-auto_discover = true    # Let UnifiedBridge find tools
-enable_learning = true  # Enable adaptive learning
+auto_discover = true    # Let BuildBridge find tools
+enable_learning = true  # Enable error learning
 
 [compile]
 flags = ["-O2", "-fPIC", "-std=c++17"]
@@ -141,6 +147,12 @@ JMake.wrap([config])                # Wrap all binaries
 JMake.wrap_binary(path; config)     # Wrap specific binary
 ```
 
+### CMake Import
+
+```julia
+JMake.import_cmake([file]; target, output)  # Import CMake project
+```
+
 ### Direct Module Access
 
 ```julia
@@ -150,8 +162,9 @@ using JMake
 compiler = LLVMake.LLVMJuliaCompiler("jmake.toml")
 wrapper = JuliaWrapItUp.BinaryWrapper("wrapper_config.toml")
 
-# Use UnifiedBridge for commands
-result = UnifiedBridge.run_simple_bash("clang++ --version")
+# Use BuildBridge for commands
+output, exitcode = BuildBridge.execute("clang++", ["--version"])
+tools = BuildBridge.discover_llvm_tools()
 ```
 
 ## Advanced Features
@@ -174,17 +187,38 @@ JMake automatically walks your C++ dependency tree:
 # Supports C++ templates, namespaces, overloading
 ```
 
-### Learning System
+### Error Learning System
 
-UnifiedBridge learns optimal command patterns:
+BuildBridge learns from compilation errors and suggests fixes:
 
 ```julia
-# After multiple compilations...
-JMake.discover_tools()  # Shows learned patterns
+# Automatically learns from errors
+# - Tracks common compiler errors
+# - Suggests fixes based on patterns
+# - Stores solutions in SQLite database
+# - Improves compilation success over time
 
-# Example output:
-# clang++: 6 args (confidence: 0.85)
-# opt: 5 args (confidence: 0.92)
+# Example: Missing include path
+# Error: "fatal error: 'vector' file not found"
+# → Learns to add -I/usr/include/c++/... flag
+```
+
+### CMake Project Import
+
+Import existing CMake projects without running CMake:
+
+```julia
+# Parse CMakeLists.txt directly
+JMake.import_cmake("path/to/CMakeLists.txt")
+
+# Import specific target
+JMake.import_cmake("CMakeLists.txt", target="mylib")
+
+# Generates jmake.toml with:
+# - Source files
+# - Include directories
+# - Compiler flags
+# - Dependencies
 ```
 
 ### Parallel Compilation
@@ -208,7 +242,7 @@ jobs = 0  # Auto-detect CPU cores
 
 JMake compilation pipeline:
 
-1. **discover_tools** - Find LLVM/Clang via UnifiedBridge
+1. **discover_tools** - Find LLVM/Clang via BuildBridge
 2. **walk_deps** - Walk dependency tree with `clang -M`
 3. **parse_ast** - Extract functions with `clang -ast-dump=json`
 4. **compile_to_ir** - Compile C++ → LLVM IR
@@ -219,6 +253,7 @@ JMake compilation pipeline:
 9. **generate_bindings** - Create Julia wrappers
 10. **generate_tests** - Create test suite
 11. **generate_docs** - Generate documentation
+12. **error_learning** - Learn from errors for future builds
 
 ## Comparison
 
@@ -249,7 +284,9 @@ JMake compilation pipeline:
 See the [examples/](examples/) directory for working examples:
 
 - **[simple_math](examples/simple_math/)** - Minimal C++ project (5 functions, fully tested ✅)
+- **[cmake_import](examples/cmake_import/)** - CMake project import example
 - [BRIDGE_INTEGRATION.md](docs/BRIDGE_INTEGRATION.md) - Complete integration guide
+- [ERROR_LEARNING.md](docs/ERROR_LEARNING.md) - Error learning system documentation
 
 ### Verified Test Results
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env julia
-# Bridge_LLVM.jl - UnifiedBridge-powered LLVM compiler orchestrator
-# Complete integration: UnifiedBridge + LLVMake + JuliaWrapItUp
+# Bridge_LLVM.jl - BuildBridge-powered LLVM compiler orchestrator
+# Complete integration: BuildBridge + LLVMake + JuliaWrapItUp
 # NOTE: This file is meant to be included from JMake.jl which handles module loading
 
 using Pkg
@@ -9,10 +9,10 @@ using JSON
 using Dates
 
 # Use already-loaded modules from parent JMake module
-# (UnifiedBridge, LLVMake, JuliaWrapItUp are loaded by JMake.jl)
+# (BuildBridge, LLVMake, JuliaWrapItUp are loaded by JMake.jl)
 
 """
-Enhanced compiler configuration with UnifiedBridge integration
+Enhanced compiler configuration with BuildBridge integration
 """
 mutable struct BridgeCompilerConfig
     # Project settings
@@ -99,24 +99,27 @@ mutable struct BridgeCompilerConfig
 end
 
 """
-Discover LLVM toolchain using UnifiedBridge
+Discover LLVM toolchain using BuildBridge
 """
-function discover_tools!(config::BridgeCompilerConfig)
-    println("🔍 Discovering LLVM tools via UnifiedBridge...")
+function discover_bridge_tools!(config::BridgeCompilerConfig)
+    println("🔍 Discovering LLVM tools via BuildBridge...")
 
     required_tools = [
         "clang", "clang++", "llvm-config", "llvm-link",
         "opt", "nm", "objdump", "llvm-ar"
     ]
 
+    # Use BuildBridge tool discovery
+    tools = BuildBridge.discover_llvm_tools(required_tools)
+
+    for (tool, path) in tools
+        config.tools[tool] = path
+        println("  ✅ $tool → $path")
+    end
+
+    # Check for missing tools
     for tool in required_tools
-        if command_exists(tool)
-            path = find_executable(tool)
-            if !isempty(path)
-                config.tools[tool] = path
-                println("  ✅ $tool → $path")
-            end
-        else
+        if !haskey(config.tools, tool)
             println("  ⚠️  $tool not found")
         end
     end
@@ -129,7 +132,7 @@ function discover_tools!(config::BridgeCompilerConfig)
 end
 
 """
-Walk dependency tree using clang -M via UnifiedBridge
+Walk dependency tree using clang -M via BuildBridge
 """
 function walk_dependencies(config::BridgeCompilerConfig, entry_file::String)
     println("📂 Walking dependencies from: $entry_file")
@@ -153,12 +156,12 @@ function walk_dependencies(config::BridgeCompilerConfig, entry_file::String)
             # Build include flags
             includes = ["-I$dir" for dir in config.include_dirs]
 
-            # Execute clang -M via UnifiedBridge
-            cmd_args = ["-M", "-MF", "/dev/null", includes..., current]
+            # Execute clang -M via BuildBridge
+            cmd_args = vcat(["-M", "-MF", "/dev/null"], includes, [current])
 
-            (output, _) = execute_with_learning("clang++", cmd_args)
+            (output, exitcode) = BuildBridge.execute("clang++", cmd_args)
 
-            if !startswith(output, "Error:")
+            if exitcode == 0
                 # Parse Make-style dependency output
                 for line in split(output, "\n")
                     # Extract header files
@@ -179,7 +182,7 @@ function walk_dependencies(config::BridgeCompilerConfig, entry_file::String)
 end
 
 """
-Parse C++ AST using clang via UnifiedBridge
+Parse C++ AST using clang via BuildBridge
 """
 function parse_ast_bridge(config::BridgeCompilerConfig, cpp_file::String)
     println("🔍 Parsing AST: $(basename(cpp_file))")
@@ -188,17 +191,16 @@ function parse_ast_bridge(config::BridgeCompilerConfig, cpp_file::String)
     includes = ["-I$dir" for dir in config.include_dirs]
     flags = config.compile_flags
 
-    cmd_args = [
-        "-Xclang", "-ast-dump=json",
-        "-fsyntax-only",
-        flags...,
-        includes...,
-        cpp_file
-    ]
+    cmd_args = vcat(
+        ["-Xclang", "-ast-dump=json", "-fsyntax-only"],
+        flags,
+        includes,
+        [cpp_file]
+    )
 
-    (output, learned) = execute_with_learning("clang++", cmd_args)
+    (output, exitcode) = BuildBridge.execute("clang++", cmd_args)
 
-    if startswith(output, "Error:")
+    if exitcode != 0
         @warn "  ❌ AST parsing failed: $output"
         return nothing
     end
@@ -206,7 +208,7 @@ function parse_ast_bridge(config::BridgeCompilerConfig, cpp_file::String)
     try
         ast = JSON.parse(output)
         functions = extract_functions_from_ast(ast)
-        println("  ✅ Found $(length(functions)) functions (pattern: $learned args)")
+        println("  ✅ Found $(length(functions)) functions")
         return functions
     catch e
         @warn "  ❌ Failed to parse AST JSON: $e"
@@ -269,7 +271,7 @@ function extract_functions_from_ast(ast::Dict)
 end
 
 """
-Compile C++ to LLVM IR via UnifiedBridge
+Compile C++ to LLVM IR via BuildBridge
 """
 function compile_to_ir(config::BridgeCompilerConfig, cpp_files::Vector{String})
     println("🔧 Compiling to LLVM IR...")
@@ -285,22 +287,21 @@ function compile_to_ir(config::BridgeCompilerConfig, cpp_files::Vector{String})
         includes = ["-I$dir" for dir in config.include_dirs]
         defines = ["-D$k=$v" for (k, v) in config.defines]
 
-        cmd_args = [
-            "-S", "-emit-llvm",
-            config.compile_flags...,
-            includes...,
-            defines...,
-            "-o", ir_file,
-            cpp_file
-        ]
+        cmd_args = vcat(
+            ["-S", "-emit-llvm"],
+            config.compile_flags,
+            includes,
+            defines,
+            ["-o", ir_file, cpp_file]
+        )
 
-        (output, learned) = execute_with_learning("clang++", cmd_args)
+        (output, exitcode) = BuildBridge.execute("clang++", cmd_args)
 
         if isfile(ir_file)
             push!(ir_files, ir_file)
             println("  ✅ $(basename(cpp_file)) → $(basename(ir_file))")
         else
-            @warn "  ❌ Failed: $cpp_file"
+            @warn "  ❌ Failed: $cpp_file\n$output"
         end
     end
 
@@ -309,19 +310,19 @@ function compile_to_ir(config::BridgeCompilerConfig, cpp_files::Vector{String})
 end
 
 """
-Link and optimize IR files via UnifiedBridge
+Link and optimize IR files via BuildBridge
 """
 function link_optimize_ir(config::BridgeCompilerConfig, ir_files::Vector{String}, output_name::String)
     println("🔗 Linking and optimizing IR...")
 
     # Link
     linked_ir = joinpath(config.build_dir, "$output_name.linked.ll")
-    cmd_args = ["-S", "-o", linked_ir, ir_files...]
+    cmd_args = vcat(["-S", "-o", linked_ir], ir_files)
 
-    (output, _) = execute_with_learning("llvm-link", cmd_args)
+    (output, exitcode) = BuildBridge.execute("llvm-link", cmd_args)
 
     if !isfile(linked_ir)
-        @warn "  ❌ Linking failed"
+        @warn "  ❌ Linking failed\n$output"
         return nothing
     end
 
@@ -333,7 +334,7 @@ function link_optimize_ir(config::BridgeCompilerConfig, ir_files::Vector{String}
 
     cmd_args = ["-S", "-O$opt_level", "-o", optimized_ir, linked_ir]
 
-    (output, _) = execute_with_learning("opt", cmd_args)
+    (output, exitcode) = BuildBridge.execute("opt", cmd_args)
 
     if isfile(optimized_ir)
         println("  ✅ Optimized with -O$opt_level")
@@ -344,7 +345,7 @@ function link_optimize_ir(config::BridgeCompilerConfig, ir_files::Vector{String}
 end
 
 """
-Create shared library via UnifiedBridge
+Create shared library via BuildBridge
 """
 function create_library(config::BridgeCompilerConfig, ir_file::String, lib_name::String)
     println("📦 Creating shared library...")
@@ -352,52 +353,50 @@ function create_library(config::BridgeCompilerConfig, ir_file::String, lib_name:
     mkpath(config.output_dir)
     lib_path = joinpath(config.output_dir, "lib$lib_name.so")
 
-    cmd_args = [
-        "-shared",
-        "-o", lib_path,
-        ir_file
-    ]
+    cmd_args = ["-shared", "-o", lib_path, ir_file]
 
     if config.enable_lto
         push!(cmd_args, "-flto")
     end
 
-    (output, _) = execute_with_learning("clang++", cmd_args)
+    (output, exitcode) = BuildBridge.execute("clang++", cmd_args)
 
     if isfile(lib_path)
         println("  ✅ Created: $lib_path")
         return lib_path
     end
 
-    @warn "  ❌ Library creation failed"
+    @warn "  ❌ Library creation failed\n$output"
     return nothing
 end
 
 """
-Extract symbols from binary via UnifiedBridge
+Extract symbols from binary via BuildBridge
 """
 function extract_symbols(config::BridgeCompilerConfig, binary_path::String)
     println("🔍 Extracting symbols...")
 
     # Try nm first
     if haskey(config.tools, "nm")
-        (output, _) = execute_with_learning("nm", ["-DC", binary_path])
+        (output, exitcode) = BuildBridge.execute("nm", ["-DC", binary_path])
 
-        symbols = Dict{String,Any}[]
+        if exitcode == 0
+            symbols = Dict{String,Any}[]
 
-        for line in split(output, "\n")
-            parts = split(strip(line))
-            if length(parts) >= 3 && parts[2] in ["T", "t"]
-                push!(symbols, Dict(
-                    "name" => parts[3],
-                    "type" => "function",
-                    "visibility" => parts[2] == "T" ? "global" : "local"
-                ))
+            for line in split(output, "\n")
+                parts = split(strip(line))
+                if length(parts) >= 3 && parts[2] in ["T", "t"]
+                    push!(symbols, Dict(
+                        "name" => parts[3],
+                        "type" => "function",
+                        "visibility" => parts[2] == "T" ? "global" : "local"
+                    ))
+                end
             end
-        end
 
-        println("  ✅ Found $(length(symbols)) symbols")
-        return symbols
+            println("  ✅ Found $(length(symbols)) symbols")
+            return symbols
+        end
     end
 
     return Dict{String,Any}[]
@@ -406,7 +405,7 @@ end
 """
 Main compilation pipeline
 """
-function compile_project(config::BridgeCompilerConfig)
+function compile_bridge_project(config::BridgeCompilerConfig)
     println("🚀 JMake Bridge LLVM - Unified Build System")
     println("=" ^ 60)
     println("📁 Project: $(config.project_name)")
@@ -416,7 +415,7 @@ function compile_project(config::BridgeCompilerConfig)
 
     # Stage 1: Discover tools
     if "discover_tools" in config.stages
-        discover_tools!(config)
+        discover_bridge_tools!(config)
     end
 
     # Find C++ sources
@@ -505,13 +504,11 @@ function compile_project(config::BridgeCompilerConfig)
         # (Implementation would call generate_julia_bindings)
     end
 
-    # Show learning statistics
+    # Show build summary
     if config.enable_learning
-        println("\n📊 UnifiedBridge Learning Statistics:")
-        stats = UnifiedBridge.get_learning_stats()
-        for (cmd, data) in stats
-            println("  $cmd: $(data["predicted_args"]) args (confidence: $(round(data["confidence"], digits=2)))")
-        end
+        println("\n📊 BuildBridge Summary:")
+        println("  Compiler: $(BuildBridge.get_compiler_info("clang++"))")
+        println("  LLVM Version: $(BuildBridge.get_llvm_version())")
     end
 
     println("\n🎉 Compilation complete!")
@@ -546,23 +543,18 @@ function main()
     if command == "compile"
         config_file = length(ARGS) >= 2 ? ARGS[2] : "jmake.toml"
         config = BridgeCompilerConfig(config_file)
-        compile_project(config)
+        compile_bridge_project(config)
 
     elseif command == "discover"
         config_file = length(ARGS) >= 2 ? ARGS[2] : "jmake.toml"
         config = BridgeCompilerConfig(config_file)
-        discover_tools!(config)
+        discover_bridge_tools!(config)
 
     elseif command == "stats"
-        stats = UnifiedBridge.get_learning_stats()
-        println("📊 UnifiedBridge Learning Statistics")
+        println("📊 BuildBridge Statistics")
         println("=" ^ 50)
-        for (cmd, data) in stats
-            println("\n🔧 $cmd")
-            println("  Patterns: $(data["patterns"])")
-            println("  Confidence: $(round(data["confidence"], digits=2))")
-            println("  Predicted args: $(data["predicted_args"])")
-        end
+        println("Compiler: $(BuildBridge.get_compiler_info("clang++"))")
+        println("LLVM Version: $(BuildBridge.get_llvm_version())")
 
     else
         println("Unknown command: $command")

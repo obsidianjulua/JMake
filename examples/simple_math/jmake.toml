@@ -1,5 +1,8 @@
 # JMake LLVMake Configuration
-project_root = "."
+
+[project]
+name = "SimpleMath"
+root = "."
 
 [paths]
 source = "src"           # C++ source directory
@@ -37,3 +40,23 @@ include_patterns = []    # If specified, only include matching functions
 "std::vector<double>" = "Vector{Float64}"
 "std::vector<float>" = "Vector{Float32}"
 "std::vector<int>" = "Vector{Int32}"
+
+[bridge]
+auto_discover = true
+enable_learning = true
+cache_tools = true
+
+[workflow]
+stages = [
+    "discover_tools",
+    "compile_to_ir",
+    "link_ir",
+    "optimize_ir",
+    "create_library",
+    "extract_symbols"
+]
+parallel = true
+
+[cache]
+enabled = true
+directory = ".bridge_cache"

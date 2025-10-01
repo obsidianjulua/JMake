@@ -8,12 +8,12 @@ module JMake
 const VERSION = v"0.1.0"
 
 # Load all submodules in the correct order
-include("UnifiedBridge.jl")
+include("BuildBridge.jl")
 include("LLVMake.jl")
 include("JuliaWrapItUp.jl")
 
 # Re-export submodules
-using .UnifiedBridge
+using .BuildBridge
 using .LLVMake
 using .JuliaWrapItUp
 
@@ -22,7 +22,7 @@ using .JuliaWrapItUp
 include("Bridge_LLVM.jl")
 
 # Export submodules themselves
-export UnifiedBridge, LLVMake, JuliaWrapItUp
+export BuildBridge, LLVMake, JuliaWrapItUp
 
 # Export key types from LLVMake
 export LLVMJuliaCompiler, CompilerConfig, TargetConfig
@@ -30,10 +30,9 @@ export LLVMJuliaCompiler, CompilerConfig, TargetConfig
 # Export key types from JuliaWrapItUp
 export BinaryWrapper, WrapperConfig, BinaryInfo
 
-# Export key functions from UnifiedBridge
-export run_simple_bash, run_with_args, capture_output
-export execute_with_learning, find_executable, command_exists
-export get_learning_stats
+# Export key functions from BuildBridge
+export execute, capture, find_executable, command_exists
+export discover_llvm_tools, compile_with_analysis
 
 # Export key functions from LLVMake
 export compile_project
@@ -116,8 +115,8 @@ JMake.compile("custom_config.toml")
 """
 function compile(config_file::String="jmake.toml")
     println("🚀 JMake - Compiling project")
-    config = Bridge_LLVM.BridgeCompilerConfig(config_file)
-    Bridge_LLVM.compile_project(config)
+    config = BridgeCompilerConfig(config_file)
+    compile_bridge_project(config)
 end
 
 """
@@ -176,8 +175,8 @@ JMake.discover_tools()
 """
 function discover_tools(config_file::String="jmake.toml")
     println("🔍 JMake - Discovering LLVM tools")
-    config = Bridge_LLVM.BridgeCompilerConfig(config_file)
-    Bridge_LLVM.discover_tools!(config)
+    config = BridgeCompilerConfig(config_file)
+    discover_bridge_tools!(config)
 end
 
 """
@@ -195,7 +194,7 @@ function info()
     ╚══════════════════════════════════════════════════════════════╝
 
     Components:
-    • UnifiedBridge   - Universal command wrapper with learning
+    • BuildBridge     - Simple command execution and tool discovery
     • LLVMake         - C++ source → Julia compiler
     • JuliaWrapItUp   - Binary → Julia wrapper generator
     • Bridge_LLVM     - Orchestrator integrating all components

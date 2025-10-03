@@ -16,8 +16,11 @@ using .LLVMEnvironment
 using .ConfigurationManager
 using .ASTWalker
 
-# Hardcoded LLVM path
-const JMAKE_LLVM_ROOT = "/home/grim/.julia/julia/JMake/LLVM"
+# Use LLVMEnvironment to get correct LLVM path
+function get_jmake_llvm_root()
+    jmake_dir = dirname(@__DIR__)  # Go from src/ to JMake/
+    return joinpath(jmake_dir, "LLVM")
+end
 
 """
 File scan results

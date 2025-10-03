@@ -258,37 +258,20 @@ function build_environment_vars(llvm_root::String, bin_dir::String, lib_dir::Str
 end
 
 """
-    init_toolchain(;isolated::Bool=true, config=nothing) -> LLVMToolchain
+    init_toolchain(;isolated::Bool=true) -> LLVMToolchain
 
 Initialize the LLVM toolchain.
 
 # Arguments
 - `isolated::Bool`: If true, uses JMake's local LLVM. If false, allows system LLVM fallback.
-- `config`: Optional JMakeConfig - reads paths from TOML if provided
 
 # Returns
 - `LLVMToolchain`: Configured toolchain instance
-
-# Priority:
-1. If config provided and has llvm.root → use TOML paths
-2. If config empty → auto-discover and update TOML
-3. Validate all tools exist, discover if missing
 """
-function init_toolchain(;isolated::Bool=true, config=nothing)
-    # Read from TOML first (source of truth)
-    llvm_root = if config !== nothing && haskey(config.llvm, "root") && !isempty(config.llvm["root"])
-        println("🔧 Initializing LLVM Toolchain from TOML")
-        config.llvm["root"]
-    else
-        println("🔧 Initializing LLVM Toolchain (auto-discover)")
-        discovered_root = get_jmake_llvm_root()
-        # Update config if provided
-        if config !== nothing
-            config.llvm["root"] = discovered_root
-        end
-        discovered_root
-    end
+function init_toolchain(;isolated::Bool=true)
+    llvm_root = get_jmake_llvm_root()
 
+    println("🔧 Initializing LLVM Toolchain")
     println("   Root: $llvm_root")
 
     # Setup paths
@@ -321,28 +304,9 @@ function init_toolchain(;isolated::Bool=true, config=nothing)
 
     println("   Version: $version_str (LLVM $major.$minor.$patch)")
 
-    # Read tools from TOML or discover
-    tools = if config !== nothing && haskey(config.llvm, "tools") && !isempty(config.llvm["tools"])
-        # TOML has tools specified - use them (user override)
-        println("   Tools: Reading from TOML")
-        config.llvm["tools"]
-    else
-        # Auto-discover and update TOML
-        println("   Tools: Auto-discovering")
-        discovered = discover_llvm_tools(llvm_root)
-        if config !== nothing
-            config.llvm["tools"] = discovered
-        end
-        discovered
-    end
-    println("   Tools: $(length(tools)) available")
-
-    # Validate tools exist, warn if missing
-    for (name, path) in tools
-        if !isfile(path) && !islink(path)
-            @warn "Tool specified in TOML not found: $name at $path"
-        end
-    end
+    # Discover tools
+    tools = discover_llvm_tools(llvm_root)
+    println("   Tools: $(length(tools)) discovered")
 
     # Discover libraries
     libraries = discover_llvm_libraries(llvm_root)

@@ -22,6 +22,11 @@ Get or initialize the global error database
 """
 function get_error_db(db_path::String="jmake_errors.db")
     if GLOBAL_ERROR_DB[] === nothing
+        # Ensure directory exists
+        db_dir = dirname(abspath(db_path))
+        if !isempty(db_dir) && !isdir(db_dir)
+            mkpath(db_dir)
+        end
         GLOBAL_ERROR_DB[] = ErrorLearning.init_db(db_path)
     end
     return GLOBAL_ERROR_DB[]

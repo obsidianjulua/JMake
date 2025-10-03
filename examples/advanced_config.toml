@@ -1,0 +1,244 @@
+# JMake Advanced Configuration Example
+# This file demonstrates all available configuration options
+# Copy and modify for your project
+
+version = "0.1.0"
+
+[project]
+name = "MyAdvancedProject"
+description = "Example project with full JMake configuration"
+version = "1.0.0"
+authors = ["Developer Name"]
+root = "."
+
+# =============================================================================
+# DISCOVERY STAGE - File scanning and dependency analysis
+# =============================================================================
+[discovery]
+enabled = true
+scan_recursive = true           # Recursively scan subdirectories
+max_depth = 10                  # Maximum directory depth
+follow_symlinks = false         # Follow symbolic links
+parse_ast = true                # Parse C++ AST for dependencies
+walk_dependencies = true        # Walk #include dependencies
+log_all_files = true           # Log all discovered files
+
+# Directories to exclude from scanning
+exclude_dirs = [
+    "build",
+    ".git",
+    ".cache",
+    "node_modules",
+    ".jmake_cache",
+    "third_party"  # Add your own
+]
+
+# File patterns to include (if empty, includes all)
+include_patterns = []  # e.g., ["src/**/*.cpp", "lib/**/*.c"]
+
+# =============================================================================
+# COMPILE STAGE - C++ to LLVM IR compilation
+# =============================================================================
+[compile]
+enabled = true
+emit_ir = true                  # Generate LLVM IR (.ll files)
+emit_bc = false                 # Generate LLVM bitcode (.bc files)
+parallel = true                 # Parallel compilation
+output_dir = "build/ir"
+
+# Compiler flags
+flags = [
+    "-std=c++17",               # C++ standard
+    "-fPIC",                    # Position independent code
+    "-O2",                      # Optimization level
+    "-Wall",                    # All warnings
+    "-Wextra",                  # Extra warnings
+    # "-g",                     # Debug symbols (uncomment if needed)
+    # "-fsanitize=address",     # Address sanitizer (uncomment if needed)
+]
+
+# Include directories (auto-populated by discovery, add custom ones here)
+include_dirs = [
+    "include",
+    "third_party/include",
+    "/usr/local/include",
+]
+
+# Preprocessor defines
+[compile.defines]
+NDEBUG = "1"                    # Disable asserts
+MY_CUSTOM_FLAG = "VALUE"
+# VERSION = "1.0.0"
+
+# =============================================================================
+# LINK STAGE - IR linking and optimization
+# =============================================================================
+[link]
+enabled = true
+optimize = true
+opt_level = "O2"                # O0, O1, O2, O3, Os, Oz
+lto = false                     # Link-time optimization
+output_dir = "build/linked"
+
+# Custom optimization passes (advanced)
+opt_passes = []  # e.g., ["inline", "mem2reg", "gvn"]
+
+# =============================================================================
+# BINARY STAGE - Shared/static library creation
+# =============================================================================
+[binary]
+enabled = true
+library_type = "shared"         # "shared" or "static"
+library_name = ""               # Auto-generated if empty
+output_dir = "julia"
+rpath = true                    # Add rpath for library dependencies
+
+# External libraries to link
+link_libraries = [
+    # "sqlite3",
+    # "pthread",
+    # "m",                      # Math library
+]
+
+# Library search paths
+lib_dirs = [
+    # "/usr/local/lib",
+]
+
+# =============================================================================
+# SYMBOLS STAGE - Symbol extraction and analysis
+# =============================================================================
+[symbols]
+enabled = true
+method = "nm"                   # "nm", "objdump", or "llvm-nm"
+demangle = true                 # Demangle C++ names
+filter_internal = true          # Filter internal symbols
+export_list = true              # Generate symbol export list
+
+# =============================================================================
+# WRAP STAGE - Julia binding generation
+# =============================================================================
+[wrap]
+enabled = true
+style = "auto"                  # "auto", "basic", "advanced", "clangjl"
+output_dir = "julia"
+module_name = ""                # Auto-generated if empty
+add_tests = true                # Generate test scaffolding
+add_docs = true                 # Generate documentation
+
+# Custom type mappings for Julia bindings
+[wrap.type_mappings]
+"std::string" = "String"
+"std::vector<double>" = "Vector{Float64}"
+"std::vector<int>" = "Vector{Int32}"
+# Add your custom type mappings
+
+# Function name filters (regex patterns)
+exclude_patterns = [
+    "^test_",                   # Exclude test functions
+    "^internal_",               # Exclude internal functions
+    ".*_impl$",                 # Exclude implementation details
+]
+
+include_patterns = []           # If set, ONLY these patterns are included
+
+# =============================================================================
+# TEST STAGE - Testing and verification
+# =============================================================================
+[test]
+enabled = false
+test_dir = "test"
+run_tests = false
+test_command = "julia --project=. test/runtests.jl"
+
+# =============================================================================
+# LLVM SETTINGS - Toolchain configuration
+# =============================================================================
+[llvm]
+use_jmake_llvm = true           # Use JMake's bundled LLVM
+isolated = true                 # Isolate from system LLVM
+root = "/home/grim/.julia/julia/JMake/LLVM"  # Auto-detected if empty
+
+# Override tool paths (usually not needed)
+[llvm.tools]
+# clang = "/path/to/custom/clang++"
+# llvm-config = "/path/to/llvm-config"
+
+# =============================================================================
+# TARGET SETTINGS - Compilation target
+# =============================================================================
+[target]
+triple = ""                     # Target triple (empty = host)
+cpu = "generic"                 # "generic", "native", "haswell", etc.
+features = []                   # ["+avx2", "+fma", "-sse4.2"]
+
+# Platform-specific settings
+[target.linux]
+# Linux-specific flags
+
+[target.macos]
+# macOS-specific flags
+
+[target.windows]
+# Windows-specific flags
+
+# =============================================================================
+# WORKFLOW - Build pipeline control
+# =============================================================================
+[workflow]
+stages = [
+    "discovery",
+    "compile",
+    "link",
+    "binary",
+    "symbols",
+    "wrap"
+]
+parallel_stages = ["compile"]   # Stages that can run in parallel
+stop_on_error = true            # Stop pipeline on first error
+verbose = true                  # Verbose output
+
+# =============================================================================
+# CACHE - Build caching
+# =============================================================================
+[cache]
+enabled = true
+directory = ".jmake_cache"
+invalidate_on_change = true     # Invalidate when source changes
+ttl = 86400                     # Cache time-to-live in seconds (24 hours)
+
+# =============================================================================
+# DAEMON - Daemon system configuration
+# =============================================================================
+[daemon]
+enabled = false                 # Enable daemon system
+auto_start = false              # Auto-start daemons
+workers = 4                     # Number of parallel workers
+
+[daemon.discovery]
+port = 3001
+
+[daemon.setup]
+port = 3002
+
+[daemon.compilation]
+port = 3003
+
+[daemon.orchestrator]
+port = 3004
+
+# =============================================================================
+# ERROR_LEARNING - Error database and learning
+# =============================================================================
+[error_learning]
+enabled = true
+database = "jmake_errors.db"
+auto_fix = false                # Automatically apply fixes
+confidence_threshold = 0.8      # Minimum confidence for auto-fix
+
+# =============================================================================
+# CUSTOM - Your custom settings
+# =============================================================================
+[custom]
+# Add your own custom configuration here
+# Accessible via config.raw_data["custom"]

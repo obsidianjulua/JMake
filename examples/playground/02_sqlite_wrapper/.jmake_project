@@ -1,0 +1,3 @@
+# SQLite wrapper project
+# Requires: libsqlite3-dev (or your distro's equivalent)
+# If build fails with "sqlite3.h not found", install the dev package!

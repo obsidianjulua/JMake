@@ -116,10 +116,10 @@ function load_config(config_file::String)::CompilerConfig
     # Find LLVM tools
     if !isnothing(llvm_root)
         # Use project-local LLVM
-        clang_path = joinpath(llvm_root, "bin", "clang++")
-        llvm_config_path = joinpath(llvm_root, "bin", "llvm-config")
-        llvm_link_path = joinpath(llvm_root, "bin", "llvm-link")
-        opt_path = joinpath(llvm_root, "bin", "opt")
+        clang_path = joinpath(llvm_root, "tools", "clang++")
+        llvm_config_path = joinpath(llvm_root, "tools", "llvm-config")
+        llvm_link_path = joinpath(llvm_root, "tools", "llvm-link")
+        opt_path = joinpath(llvm_root, "tools", "opt")
     else
         # Find system LLVM
         clang_path = find_tool("clang++", get(llvm, "clang", ""))

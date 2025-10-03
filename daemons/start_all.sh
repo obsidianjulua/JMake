@@ -1,64 +1,59 @@
 #!/bin/bash
-# Start all JMake daemon servers
+# start_all.sh - Start all JMake daemon servers
 
-echo "Starting JMake Daemon Servers..."
-echo "================================"
+JMAKE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DAEMON_DIR="$JMAKE_ROOT/daemons/servers"
+LOG_DIR="$JMAKE_ROOT/daemons/logs"
 
-# Start discovery daemon
-echo "Starting Discovery Daemon (port 3001)..."
-julia --project=.. servers/discovery_daemon.jl &
-DISCOVERY_PID=$!
-echo "  PID: $DISCOVERY_PID"
+# Create log directory
+mkdir -p "$LOG_DIR"
 
-sleep 2
+echo "======================================================================="
+echo "Starting JMake Daemon System"
+echo "======================================================================="
+echo "JMake Root: $JMAKE_ROOT"
+echo "Daemon Dir: $DAEMON_DIR"
+echo "Log Dir:    $LOG_DIR"
+echo ""
 
-# Start setup daemon
-echo "Starting Setup Daemon (port 3002)..."
-julia --project=.. servers/setup_daemon.jl &
-SETUP_PID=$!
-echo "  PID: $SETUP_PID"
+# Array of daemons with their ports
+declare -A DAEMONS
+DAEMONS=(
+    ["discovery_daemon.jl"]="3001"
+    ["setup_daemon.jl"]="3002"
+    ["compilation_daemon.jl"]="3003"
+    ["orchestrator_daemon.jl"]="3004"
+)
 
-sleep 2
+# Start each daemon
+for daemon in "${!DAEMONS[@]}"; do
+    port="${DAEMONS[$daemon]}"
+    daemon_path="$DAEMON_DIR/$daemon"
+    log_file="$LOG_DIR/${daemon%.jl}.log"
+    pid_file="$LOG_DIR/${daemon%.jl}.pid"
 
-# Start compilation daemon (with 4 workers)
-echo "Starting Compilation Daemon (port 3003, 4 workers)..."
-julia --project=.. -p 4 servers/compilation_daemon.jl &
-COMPILE_PID=$!
-echo "  PID: $COMPILE_PID"
+    echo "Starting $daemon on port $port..."
 
-sleep 3
+    # Start daemon in background
+    julia --project="$JMAKE_ROOT" "$daemon_path" > "$log_file" 2>&1 &
+    daemon_pid=$!
 
-# Start orchestrator daemon
-echo "Starting Orchestrator Daemon (port 3004)..."
-julia --project=.. servers/orchestrator_daemon.jl &
-ORCHESTRATOR_PID=$!
-echo "  PID: $ORCHESTRATOR_PID"
+    # Save PID
+    echo $daemon_pid > "$pid_file"
 
-sleep 2
-
-# Start error handler daemon (old port 3002, now shared with setup)
-# echo "Starting Error Handler Daemon..."
-# julia --project=.. servers/error_handler_daemon.jl &
-# ERROR_PID=$!
-
-# Start watcher daemon (old port 3003, now shared with compilation)
-# echo "Starting Watcher Daemon..."
-# julia --project=.. servers/watcher_daemon.jl &
-# WATCHER_PID=$!
+    # Wait a moment and check if still running
+    sleep 1
+    if kill -0 $daemon_pid 2>/dev/null; then
+        echo "  ✓ Started (PID: $daemon_pid)"
+    else
+        echo "  ✗ Failed to start (check $log_file)"
+    fi
+done
 
 echo ""
-echo "All daemons started!"
-echo "================================"
-echo "Discovery Daemon:     PID $DISCOVERY_PID (port 3001)"
-echo "Setup Daemon:         PID $SETUP_PID (port 3002)"
-echo "Compilation Daemon:   PID $COMPILE_PID (port 3003, 4 workers)"
-echo "Orchestrator Daemon:  PID $ORCHESTRATOR_PID (port 3004)"
-echo ""
-echo "To stop all daemons, run: ./stop_all.sh"
-echo "To check status, run: ./status.sh"
-
-# Save PIDs to file
-echo $DISCOVERY_PID > .daemon_pids.discovery
-echo $SETUP_PID > .daemon_pids.setup
-echo $COMPILE_PID > .daemon_pids.compilation
-echo $ORCHESTRATOR_PID > .daemon_pids.orchestrator
+echo "======================================================================="
+echo "Daemon System Started"
+echo "======================================================================="
+echo "Check logs in: $LOG_DIR"
+echo "Stop all daemons: ./stop_all.sh"
+echo "Check status: ./status.sh"

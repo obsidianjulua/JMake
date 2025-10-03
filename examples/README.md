@@ -2,7 +2,31 @@
 
 This directory contains example projects demonstrating JMake's capabilities.
 
-## Examples
+## 🎮 Playground (Start Here!)
+
+**New to JMake?** The `playground/` directory has simple, fun examples perfect for learning:
+
+```bash
+cd playground/01_hello_cpp
+julia -e 'using JMake; JMake.discover(); JMake.compile()'
+julia test_hello.jl
+```
+
+- `01_hello_cpp` - Your first build (literally just add two numbers)
+- `02_sqlite_wrapper` - External library linking with SQLite
+- `03_math_library` - Multi-file project with headers
+
+Each example has:
+- Commented C++ code explaining what's happening
+- `.jmake_project` marker file
+- Test script to verify it works
+- Instructions in `playground/README.md`
+
+**The playground is your sandbox.** Break things, modify code, learn by doing!
+
+---
+
+## 📚 Full Examples
 
 ### 1. Simple Math (`simple_math/`)
 

@@ -1,35 +1,42 @@
 #!/bin/bash
-# Check status of JMake daemon servers
+# status.sh - Check status of all JMake daemon servers
 
-echo "JMake Daemon Status"
-echo "================================"
+JMAKE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOG_DIR="$JMAKE_ROOT/daemons/logs"
 
-check_daemon() {
-    name=$1
-    pid_file=$2
-    port=$3
+echo "======================================================================="
+echo "JMake Daemon System Status"
+echo "======================================================================="
 
-    if [ -f $pid_file ]; then
-        PID=$(cat $pid_file)
-        if ps -p $PID > /dev/null 2>&1; then
-            echo "✓ $name: RUNNING (PID $PID, port $port)"
-            return 0
+if [ ! -d "$LOG_DIR" ]; then
+    echo "No daemon logs directory found. Daemons are not running."
+    exit 0
+fi
+
+running=0
+stopped=0
+
+for pid_file in "$LOG_DIR"/*.pid; do
+    if [ -f "$pid_file" ]; then
+        daemon_name=$(basename "$pid_file" .pid)
+        pid=$(cat "$pid_file")
+
+        if kill -0 $pid 2>/dev/null; then
+            echo "✓ $daemon_name (PID: $pid) - RUNNING"
+            ((running++))
         else
-            echo "✗ $name: STOPPED (stale PID file)"
-            return 1
+            echo "✗ $daemon_name - STOPPED (stale PID: $pid)"
+            ((stopped++))
+            rm "$pid_file"  # Clean up stale PID
         fi
-    else
-        echo "✗ $name: STOPPED"
-        return 1
     fi
-}
+done
 
-# Check each daemon
-check_daemon "Discovery Daemon   " ".daemon_pids.discovery" "3001"
-check_daemon "Setup Daemon       " ".daemon_pids.setup" "3002"
-check_daemon "Compilation Daemon " ".daemon_pids.compilation" "3003"
-check_daemon "Orchestrator Daemon" ".daemon_pids.orchestrator" "3004"
+if [ $running -eq 0 ] && [ $stopped -eq 0 ]; then
+    echo "No daemons found."
+fi
 
 echo ""
-echo "To start all daemons: ./start_all.sh"
-echo "To stop all daemons:  ./stop_all.sh"
+echo "Running: $running"
+echo "Stopped: $stopped"
+echo "======================================================================="

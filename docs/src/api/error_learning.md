@@ -45,10 +45,15 @@ Uses Levenshtein distance and pattern matching to find similar errors:
 ## Functions
 
 ```@docs
-JMake.ErrorLearning.learn_error
+JMake.ErrorLearning.init_db
+JMake.ErrorLearning.record_error
+JMake.ErrorLearning.record_fix
+JMake.ErrorLearning.detect_error_pattern
 JMake.ErrorLearning.find_similar_errors
-JMake.ErrorLearning.suggest_fix
-JMake.ErrorLearning.get_error_statistics
+JMake.ErrorLearning.suggest_fixes
+JMake.ErrorLearning.get_successful_fixes
+JMake.ErrorLearning.get_error_stats
+JMake.ErrorLearning.export_to_markdown
 ```
 
 ## Usage Examples
@@ -58,6 +63,9 @@ JMake.ErrorLearning.get_error_statistics
 ```julia
 using JMake.ErrorLearning
 
+# Initialize database
+db = init_db("jmake_errors.db")
+
 # Compilation failed with error
 error_msg = """
 test.cpp:10:5: error: use of undeclared identifier 'cout'
@@ -65,11 +73,26 @@ test.cpp:10:5: error: use of undeclared identifier 'cout'
     ^
 """
 
-# Learn from this error
-learn_error(
+# Record the error
+(error_id, pattern, description) = record_error(
+    db,
+    "clang++ test.cpp",
     error_msg,
-    context = "test.cpp",
-    solution = "Add: #include <iostream>\nUse: std::cout"
+    project_path="/home/user/project",
+    file_path="test.cpp"
+)
+
+println("Error pattern: $pattern")
+println("Description: $description")
+
+# Record a fix attempt
+record_fix(
+    db,
+    error_id,
+    "Added #include <iostream>",
+    "add_header",
+    "code_change",
+    true  # success
 )
 ```
 
@@ -79,34 +102,28 @@ learn_error(
 # New error occurs
 new_error = "main.cpp:15:3: error: use of undeclared identifier 'cin'"
 
-# Find similar past errors
-similar = find_similar_errors(new_error)
+# Detect pattern
+(pattern, desc, captures) = detect_error_pattern(new_error)
 
-if !isempty(similar)
-    println("Found $(length(similar)) similar errors")
-    best_match = similar[1]
-    println("Similarity: $(best_match.similarity * 100)%")
-    println("Suggested fix: $(best_match.solution)")
+# Find similar past errors
+similar = find_similar_errors(db, pattern, new_error)
+
+if similar !== nothing && size(similar, 1) > 0
+    println("Found $(size(similar, 1)) similar errors")
 end
 ```
 
 ### Auto-suggest Fixes
 
 ```julia
-# During compilation
-try
-    compile_source("code.cpp")
-catch e
-    # Automatically suggest fix
-    suggestion = suggest_fix(e.message)
+# Get fix suggestions for an error
+suggestions = suggest_fixes(db, error_msg)
 
-    if suggestion !== nothing
-        println("Error: $(e.message)")
-        println("\nSuggested fix:")
-        println(suggestion.fix)
-        println("\nConfidence: $(suggestion.confidence * 100)%")
-        println("Based on $(suggestion.occurrences) previous occurrences")
-    end
+for (i, suggestion) in enumerate(suggestions)
+    println("\nSuggestion $i:")
+    println("  Description: $(suggestion["description"])")
+    println("  Action: $(suggestion["action"])")
+    println("  Confidence: $(suggestion["confidence"] * 100)%")
 end
 ```
 

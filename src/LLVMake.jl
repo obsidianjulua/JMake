@@ -10,6 +10,10 @@ using JSON
 using TOML
 using Dates
 
+# Load BuildBridge for error learning and command execution
+include("BuildBridge.jl")
+using .BuildBridge
+
 """
 Configuration for LLVM compilation targets and options
 """
@@ -129,11 +133,11 @@ function load_config(config_file::String)::CompilerConfig
     target = TargetConfig(
         triple=get(target_data, "triple", ""),
         cpu=get(target_data, "cpu", "generic"),
-        features=get(target_data, "features", String[]),
+        features=String[get(target_data, "features", String[])...],  # Convert to String[] to handle TOML empty arrays
         opt_level=get(target_data, "opt_level", "O2"),
         debug=get(target_data, "debug", false),
         lto=get(target_data, "lto", false),
-        sanitizers=get(target_data, "sanitizers", String[])
+        sanitizers=String[get(target_data, "sanitizers", String[])...]  # Convert to String[] to handle TOML empty arrays
     )
 
     # Parse compilation settings
@@ -504,19 +508,40 @@ function compile_to_ir(compiler::LLVMJuliaCompiler, cpp_files::Vector{String})
 
     ir_files = String[]
     flags = get_compiler_flags(compiler)
+    db = BuildBridge.get_error_db(joinpath(compiler.config.build_dir, "jmake_errors.db"))
 
     for cpp_file in cpp_files
         ir_file = joinpath(compiler.config.build_dir, "$(basename(cpp_file)).ll")
         mkpath(dirname(ir_file))
 
-        cmd = `$(compiler.config.clang_path) -S -emit-llvm $flags -o $ir_file $cpp_file`
+        # Build command args
+        args = ["-S", "-emit-llvm", flags..., "-o", ir_file, cpp_file]
 
-        try
-            run(cmd)
+        # Execute with error learning
+        output, exitcode = BuildBridge.execute(compiler.config.clang_path, args)
+
+        if exitcode == 0
             push!(ir_files, ir_file)
             println("  ✓ $(basename(cpp_file)) → $(basename(ir_file))")
-        catch e
-            @error "Failed to compile $cpp_file: $e"
+        else
+            # Record error in database
+            (error_id, pattern_name, description) = BuildBridge.ErrorLearning.record_error(
+                db, "$(compiler.config.clang_path) $(join(args, " "))", output,
+                project_path=compiler.config.build_dir, file_path=cpp_file)
+
+            @error "Failed to compile $cpp_file: $pattern_name - $description"
+            println("Error output:\n$output")
+
+            # Get suggestions
+            suggestions = BuildBridge.ErrorLearning.suggest_fixes(db, output,
+                project_path=compiler.config.build_dir)
+
+            if !isempty(suggestions)
+                println("\n💡 Suggestions:")
+                for (i, sug) in enumerate(suggestions[1:min(3, length(suggestions))])
+                    println("  $i. $(sug["description"]) (confidence: $(round(sug["confidence"], digits=2)))")
+                end
+            end
         end
     end
 
@@ -528,16 +553,22 @@ Optimize and link LLVM IR files
 """
 function optimize_and_link_ir(compiler::LLVMJuliaCompiler, ir_files::Vector{String}, output_name::String)
     println("⚡ Optimizing and linking IR...")
+    db = BuildBridge.get_error_db(joinpath(compiler.config.build_dir, "jmake_errors.db"))
 
     # Link all IR files
     linked_ir = joinpath(compiler.config.build_dir, "$output_name.linked.ll")
-    link_cmd = `$(compiler.config.llvm_link_path) -S -o $linked_ir $ir_files`
+    link_args = ["-S", "-o", linked_ir, ir_files...]
 
-    try
-        run(link_cmd)
+    output, exitcode = BuildBridge.execute(compiler.config.llvm_link_path, link_args)
+
+    if exitcode == 0
         println("  ✓ Linked $(length(ir_files)) files")
-    catch e
-        @error "Failed to link IR files: $e"
+    else
+        BuildBridge.ErrorLearning.record_error(
+            db, "$(compiler.config.llvm_link_path) $(join(link_args, " "))", output,
+            project_path=compiler.config.build_dir)
+        @error "Failed to link IR files"
+        println("Error output:\n$output")
         return nothing
     end
 
@@ -545,14 +576,19 @@ function optimize_and_link_ir(compiler::LLVMJuliaCompiler, ir_files::Vector{Stri
     if compiler.config.target.opt_level != "O0"
         optimized_ir = joinpath(compiler.config.build_dir, "$output_name.opt.ll")
         opt_level = replace(compiler.config.target.opt_level, "O" => "")
-        opt_cmd = `$(compiler.config.opt_path) -S -O$opt_level -o $optimized_ir $linked_ir`
+        opt_args = ["-S", "-O$opt_level", "-o", optimized_ir, linked_ir]
 
-        try
-            run(opt_cmd)
+        output, exitcode = BuildBridge.execute(compiler.config.opt_path, opt_args)
+
+        if exitcode == 0
             println("  ✓ Optimized with -O$opt_level")
             return optimized_ir
-        catch e
-            @warn "Optimization failed, using unoptimized IR: $e"
+        else
+            BuildBridge.ErrorLearning.record_error(
+                db, "$(compiler.config.opt_path) $(join(opt_args, " "))", output,
+                project_path=compiler.config.build_dir)
+            @warn "Optimization failed, using unoptimized IR"
+            println("Error output:\n$output")
         end
     end
 
@@ -564,6 +600,7 @@ Compile IR to shared library
 """
 function compile_ir_to_shared_lib(compiler::LLVMJuliaCompiler, ir_file::String, lib_name::String)
     println("📦 Creating shared library...")
+    db = BuildBridge.get_error_db(joinpath(compiler.config.build_dir, "jmake_errors.db"))
 
     output_lib = joinpath(compiler.config.output_dir, "lib$lib_name.so")
     mkpath(dirname(output_lib))
@@ -579,14 +616,19 @@ function compile_ir_to_shared_lib(compiler::LLVMJuliaCompiler, ir_file::String, 
         push!(link_flags, "-l$lib")
     end
 
-    cmd = `$(compiler.config.clang_path) -shared $flags $link_flags -o $output_lib $ir_file`
+    args = vcat(["-shared"], flags, link_flags, ["-o", output_lib, ir_file])
 
-    try
-        run(cmd)
+    output, exitcode = BuildBridge.execute(compiler.config.clang_path, args)
+
+    if exitcode == 0
         println("  ✓ Created: $output_lib")
         return output_lib
-    catch e
-        @error "Failed to create shared library: $e"
+    else
+        BuildBridge.ErrorLearning.record_error(
+            db, "$(compiler.config.clang_path) $(join(args, " "))", output,
+            project_path=compiler.config.build_dir)
+        @error "Failed to create shared library"
+        println("Error output:\n$output")
         return nothing
     end
 end

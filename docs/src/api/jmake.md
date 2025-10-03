@@ -4,10 +4,9 @@ Main JMake module API reference.
 
 ## Module Information
 
-```@docs
-JMake
-JMake.VERSION
-```
+The JMake module provides a complete TOML-based build system for generating Julia bindings from C++ code using LLVM/Clang.
+
+**Version:** `JMake.VERSION` constant contains the current version.
 
 ## Initialization Functions
 

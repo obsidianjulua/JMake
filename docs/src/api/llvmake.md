@@ -15,9 +15,14 @@ LLVMake is the core compilation engine that:
 
 ```@docs
 JMake.LLVMake.compile_project
-JMake.LLVMake.compile_source
-JMake.LLVMake.link_library
+JMake.LLVMake.load_config
 JMake.LLVMake.create_default_config
+JMake.LLVMake.compile_to_ir
+JMake.LLVMake.optimize_and_link_ir
+JMake.LLVMake.compile_ir_to_shared_lib
+JMake.LLVMake.generate_julia_bindings
+JMake.LLVMake.parse_cpp_ast
+JMake.LLVMake.find_cpp_files
 ```
 
 ## Compilation Pipeline
@@ -54,18 +59,19 @@ config = BridgeCompilerConfig("jmake.toml")
 compile_project(config)
 ```
 
-### Compile Single Source
+### Compile Source to IR
 
 ```julia
-# Compile individual file
-output = compile_source(
-    "src/myfile.cpp",
-    include_dirs=["include"],
-    defines=["DEBUG=1"],
-    standard="c++17"
-)
+using JMake.LLVMake
 
-println("Generated: $output")
+# Create compiler instance
+compiler = LLVMJuliaCompiler("jmake.toml")
+
+# Compile C++ files to LLVM IR
+cpp_files = ["src/myfile.cpp", "src/utils.cpp"]
+ir_files = compile_to_ir(compiler, cpp_files)
+
+println("Generated IR files: $ir_files")
 ```
 
 ### Custom Compilation

@@ -15,9 +15,6 @@ The Discovery module automatically analyzes project structures to:
 
 ```@docs
 JMake.Discovery.discover
-JMake.Discovery.scan_directory
-JMake.Discovery.analyze_structure
-JMake.Discovery.detect_build_system
 ```
 
 ## Discovery Pipeline

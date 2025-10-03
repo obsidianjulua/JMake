@@ -46,9 +46,15 @@ end
 
 ```@docs
 JMake.ConfigurationManager.load_config
-JMake.ConfigurationManager.validate_config
 JMake.ConfigurationManager.save_config
-JMake.ConfigurationManager.merge_configs
+JMake.ConfigurationManager.create_default_config
+JMake.ConfigurationManager.get_stage_config
+JMake.ConfigurationManager.is_stage_enabled
+JMake.ConfigurationManager.get_include_dirs
+JMake.ConfigurationManager.set_include_dirs
+JMake.ConfigurationManager.get_source_files
+JMake.ConfigurationManager.set_source_files
+JMake.ConfigurationManager.print_config_summary
 ```
 
 ## Usage Examples
@@ -66,31 +72,29 @@ println("C++ Standard: $(config.compiler.standard)")
 println("Sources: $(config.sources.files)")
 ```
 
-### Validate Configuration
+### Check Stage Status
 
 ```julia
-# Validate loaded config
-is_valid, errors = validate_config(config)
-
-if !is_valid
-    println("Configuration errors:")
-    for error in errors
-        println("  - $error")
-    end
+# Check if a build stage is enabled
+if is_stage_enabled(config, :compile)
+    println("Compile stage is enabled")
 end
+
+# Get stage-specific configuration
+compile_config = get_stage_config(config, :compile)
+println("Compile flags: $(get(compile_config, "flags", []))")
 ```
 
-### Merge Configurations
+### Manage Include Directories
 
 ```julia
-# Base configuration
-base_config = load_config("base.toml")
+# Get include directories
+includes = get_include_dirs(config)
+println("Include directories: $includes")
 
-# Override with project-specific
-project_config = load_config("project.toml")
-
-# Merge (project overrides base)
-final_config = merge_configs(base_config, project_config)
+# Set include directories
+set_include_dirs(config, ["/usr/include", "./include"])
+save_config(config)
 ```
 
 ### Create Default Configuration

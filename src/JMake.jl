@@ -12,31 +12,33 @@ include("LLVMEnvironment.jl")  # Load LLVM environment first for toolchain isola
 include("ConfigurationManager.jl")  # Configuration management
 include("ASTWalker.jl")  # AST dependency analysis
 include("Discovery.jl")  # Discovery pipeline
-include("Templates.jl")
+include("ErrorLearning.jl")  # Error learning system
 include("BuildBridge.jl")
 include("CMakeParser.jl")
 include("LLVMake.jl")
 include("JuliaWrapItUp.jl")
 include("ClangJLBridge.jl")
+include("DaemonManager.jl")  # Integrated daemon lifecycle management
 
 # Re-export submodules
 using .LLVMEnvironment
 using .ConfigurationManager
 using .ASTWalker
 using .Discovery
-using .Templates
+using .ErrorLearning
 using .BuildBridge
 using .CMakeParser
 using .LLVMake
 using .JuliaWrapItUp
 using .ClangJLBridge
+using .DaemonManager
 
 # Load Bridge_LLVM helper functions after modules are available
 # (Bridge_LLVM uses the already-loaded modules above)
 include("Bridge_LLVM.jl")
 
 # Export submodules themselves
-export LLVMEnvironment, ConfigurationManager, ASTWalker, Discovery, Templates, BuildBridge, CMakeParser, LLVMake, JuliaWrapItUp, ClangJLBridge
+export LLVMEnvironment, ConfigurationManager, ASTWalker, Discovery, ErrorLearning, BuildBridge, CMakeParser, LLVMake, JuliaWrapItUp, ClangJLBridge, DaemonManager
 
 # Export key types from LLVMake
 export LLVMJuliaCompiler, CompilerConfig, TargetConfig
@@ -56,6 +58,9 @@ export to_jmake_config, write_jmake_config
 # Export JMake high-level functions
 export init, compile, wrap, wrap_binary, discover_tools
 export import_cmake, export_errors, info, help, scan, analyze
+
+# Export daemon management functions
+export start_daemons, stop_daemons, daemon_status, ensure_daemons
 
 # Export Discovery pipeline
 export discover
@@ -288,7 +293,22 @@ JMake.scan(".", output="my_config.toml")  # Custom output name
 ```
 """
 function scan(path="."; generate_config=true, output="jmake.toml")
-    Templates.scan_project(path; generate_config=generate_config, output=output)
+    println("🔍 Scanning project: $path")
+
+    # Use Discovery module to scan project
+    result = Discovery.discover(path, force=true)
+
+    if generate_config && haskey(result, :scan_results)
+        println("📝 Generating configuration: $output")
+        # The discover function already generates config, just make sure it exists
+        config_path = joinpath(path, "jmake.toml")
+        if isfile(config_path) && output != "jmake.toml"
+            # Copy to requested output name
+            cp(config_path, joinpath(path, output), force=true)
+        end
+    end
+
+    return result
 end
 
 """
@@ -299,11 +319,12 @@ Analyze project structure and return detailed analysis.
 # Examples
 ```julia
 result = JMake.analyze("path/to/project")
-println("Found \$(length(result.files.cpp_sources)) C++ files")
+println("Found \$(length(result[:scan_results].cpp_sources)) C++ files")
 ```
 """
 function analyze(path=".")
-    Templates.analyze_project(path)
+    # Return discovery results for analysis (always force scan for analysis)
+    return Discovery.discover(path, force=true)
 end
 
 """
@@ -386,6 +407,103 @@ function help()
 
     For detailed documentation, see the README.md file.
     """)
+end
+
+# ============================================================================
+# DAEMON MANAGEMENT FUNCTIONS
+# ============================================================================
+
+# Global daemon system instance
+const DAEMON_SYSTEM = Ref{Union{DaemonManager.DaemonSystem, Nothing}}(nothing)
+
+"""
+    start_daemons(;project_root=pwd())
+
+Start all JMake daemon servers (discovery, setup, compilation, orchestrator).
+Replaces manual shell script execution.
+
+# Examples
+```julia
+JMake.start_daemons()  # Start in current directory
+JMake.start_daemons(project_root="/path/to/project")
+```
+"""
+function start_daemons(;project_root=pwd())
+    if !isnothing(DAEMON_SYSTEM[])
+        println("⚠ Daemons already running. Use stop_daemons() first to restart.")
+        return DAEMON_SYSTEM[]
+    end
+
+    # Clean up stale PID files
+    DaemonManager.cleanup_stale_pids(project_root)
+
+    # Start daemon system
+    DAEMON_SYSTEM[] = DaemonManager.start_all(project_root=project_root)
+
+    return DAEMON_SYSTEM[]
+end
+
+"""
+    stop_daemons()
+
+Stop all running JMake daemons gracefully.
+
+# Examples
+```julia
+JMake.stop_daemons()
+```
+"""
+function stop_daemons()
+    if isnothing(DAEMON_SYSTEM[])
+        println("No daemons are running")
+        return
+    end
+
+    DaemonManager.stop_all(DAEMON_SYSTEM[])
+    DAEMON_SYSTEM[] = nothing
+end
+
+"""
+    daemon_status()
+
+Display status of all JMake daemons.
+
+# Examples
+```julia
+JMake.daemon_status()
+```
+"""
+function daemon_status()
+    if isnothing(DAEMON_SYSTEM[])
+        println("No daemons are running")
+        println("\nStart daemons with: JMake.start_daemons()")
+        return
+    end
+
+    DaemonManager.status(DAEMON_SYSTEM[])
+end
+
+"""
+    ensure_daemons()
+
+Check if all daemons are running and restart any that have crashed.
+Returns true if all daemons are healthy.
+
+# Examples
+```julia
+if !JMake.ensure_daemons()
+    println("Some daemons failed to restart")
+end
+```
+"""
+function ensure_daemons()
+    if isnothing(DAEMON_SYSTEM[])
+        println("Starting daemons...")
+        start_daemons()
+        return true
+    end
+
+    return DaemonManager.ensure_running(DAEMON_SYSTEM[])
 end
 
 # Show info on module load

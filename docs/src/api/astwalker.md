@@ -18,58 +18,59 @@ The AST (Abstract Syntax Tree) is a tree representation of source code structure
 ## Functions
 
 ```@docs
-JMake.ASTWalker.analyze_file
-JMake.ASTWalker.extract_dependencies
-JMake.ASTWalker.find_definitions
-JMake.ASTWalker.get_includes
+JMake.ASTWalker.build_dependency_graph
+JMake.ASTWalker.extract_includes_simple
+JMake.ASTWalker.extract_includes_clang
+JMake.ASTWalker.parse_source_structure
+JMake.ASTWalker.resolve_include_path
+JMake.ASTWalker.export_dependency_graph_json
+JMake.ASTWalker.print_dependency_summary
 ```
 
 ## Usage Examples
 
-### Analyze Single File
+### Build Dependency Graph
 
 ```julia
 using JMake.ASTWalker
 
-# Analyze C++ file
-result = analyze_file("src/myclass.cpp",
-    include_dirs=["include"]
-)
-
-# View dependencies
-println("Dependencies: $(result.dependencies)")
-println("Includes: $(result.includes)")
-```
-
-### Extract Function Signatures
-
-```julia
-# Find all function definitions
-functions = find_definitions("src/api.cpp",
-    type=:function
-)
-
-for func in functions
-    println("Function: $(func.name)")
-    println("  Return type: $(func.return_type)")
-    println("  Parameters: $(func.parameters)")
-end
-```
-
-### Dependency Graph
-
-```julia
 # Build dependency graph for project
 files = ["src/a.cpp", "src/b.cpp", "src/c.cpp"]
+include_dirs = ["include", "src"]
+clang_path = "/usr/bin/clang++"
 
-graph = Dict()
-for file in files
-    deps = extract_dependencies(file)
-    graph[file] = deps
-end
+graph = build_dependency_graph(
+    files,
+    include_dirs,
+    use_clang=true,
+    clang_path=clang_path
+)
 
-# Topological sort for build order
-build_order = topological_sort(graph)
+# View results
+print_dependency_summary(graph)
+
+# Export to JSON
+export_dependency_graph_json(graph, "deps.json")
+```
+
+### Extract Includes (Simple)
+
+```julia
+# Fast regex-based include extraction
+includes = extract_includes_simple("src/myclass.cpp")
+println("Includes: $includes")
+```
+
+### Parse Source Structure
+
+```julia
+# Parse C++ source structure
+deps = parse_source_structure("src/api.cpp")
+
+println("Namespaces: $(deps.namespaces)")
+println("Classes: $(deps.classes)")
+println("Functions: $(deps.functions)")
+println("Includes: $(deps.includes)")
 ```
 
 ## Analysis Results

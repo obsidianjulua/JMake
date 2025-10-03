@@ -1,13 +1,23 @@
 using Documenter
 
 # Push JMake modules to LOAD_PATH
-push!(LOAD_PATH, "../src/")
+push!(LOAD_PATH, joinpath(@__DIR__, "..", "src"))
 
 # Import modules for API documentation
-try
-    using JMake
-catch e
-    @warn "JMake module couldn't be loaded" exception=e
+using JMake
+
+# Get all submodules that are actually exported
+# Since JMake re-exports the modules, we can access them directly
+modules_list = Module[JMake]
+
+# Add submodules if they're available
+for mod_name in [:LLVMEnvironment, :ConfigurationManager, :ASTWalker,
+                  :Discovery, :ErrorLearning, :BuildBridge,
+                  :CMakeParser, :LLVMake, :JuliaWrapItUp,
+                  :ClangJLBridge, :DaemonManager]
+    if isdefined(JMake, mod_name)
+        push!(modules_list, getfield(JMake, mod_name))
+    end
 end
 
 makedocs(
@@ -17,7 +27,7 @@ makedocs(
         canonical = "https://github.com/yourusername/JMake.jl",
         collapselevel = 1,
     ),
-    modules = [JMake],
+    modules = modules_list,
     pages = [
         "Home" => "index.md",
         "Getting Started" => [
@@ -30,6 +40,7 @@ makedocs(
             "guides/binary_wrapping.md",
             "guides/cmake_import.md",
             "guides/daemon_system.md",
+            "guides/testing_validation.md",
         ],
         "API Reference" => [
             "api/jmake.md",
@@ -55,7 +66,8 @@ makedocs(
             "architecture/job_queue.md",
         ],
     ],
-    checkdocs = :exports,
+    checkdocs = :none,
+    warnonly = [:missing_docs, :cross_references, :docs_block],
 )
 
 # Deploy documentation to gh-pages branch

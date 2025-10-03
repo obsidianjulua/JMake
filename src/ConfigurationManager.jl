@@ -105,12 +105,15 @@ function load_config(config_file::String="jmake.toml")
     workflow = get(data, "workflow", Dict())
     cache = get(data, "cache", Dict())
 
+    # Extract project root from config file location
+    config_dir = dirname(abspath(config_file))
+
     config = JMakeConfig(
         config_file,
         now(),
         get(data, "version", "0.1.0"),
-        get(project, "name", basename(pwd())),
-        get(project, "root", pwd()),
+        get(project, "name", basename(config_dir)),
+        get(project, "root", config_dir),
         discovery,
         reorganize,
         compile,

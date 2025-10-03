@@ -1,62 +1,96 @@
-# JMake LLVMake Configuration
-
-[project]
-name = "SimpleMath"
-root = "."
-
-[paths]
-source = "src"           # C++ source directory
-output = "julia"         # Julia output directory
-build = "build"          # Build artifacts directory
-
-[llvm]
-# Leave empty to use system LLVM, or specify paths
-# root = "/path/to/llvm"  # Project-local LLVM installation
-# clang = "clang++-20"    # Specific clang version
-# config = "llvm-config-20"
-
-[target]
-triple = ""              # Target triple (empty = host)
-cpu = "generic"          # Target CPU: generic, native, haswell, etc.
-opt_level = "O2"         # Optimization: O0, O1, O2, O3, Os, Oz
-debug = false            # Include debug symbols
-lto = false              # Link-time optimization
+version = "0.1.0"
+last_updated = "2025-10-03T14:42:59.325"
 
 [compile]
-include_dirs = ["include"]
+emit_ir = true
+parallel = true
+flags = ["-std=c++17", "-fPIC", "-O2"]
+enabled = true
+output_dir = "build/ir"
 
-[compile.defines]
-# NDEBUG = "1"
-# CUSTOM_FLAG = "value"
+[link]
+optimize = true
+opt_level = "O2"
+enabled = true
+output_dir = "build/linked"
+lto = false
 
-[bindings]
-style = "simple"         # simple, advanced, cxxwrap
-exclude_patterns = ["^test_", "^internal_", ".*_impl$"]
-include_patterns = []    # If specified, only include matching functions
-
-[bindings.type_mappings]
-# Map C++ types to Julia types
-"std::string" = "String"
-"std::vector<double>" = "Vector{Float64}"
-"std::vector<float>" = "Vector{Float32}"
-"std::vector<int>" = "Vector{Int32}"
-
-[bridge]
-auto_discover = true
-enable_learning = true
-cache_tools = true
+[binary]
+library_type = "shared"
+library_name = "libsimple_math.so"
+rpath = true
+enabled = true
+output_dir = "julia"
 
 [workflow]
-stages = [
-    "discover_tools",
-    "compile_to_ir",
-    "link_ir",
-    "optimize_ir",
-    "create_library",
-    "extract_symbols"
-]
-parallel = true
+stages = ["discovery", "compile", "link", "binary", "symbols", "wrap"]
+parallel_stages = ["compile"]
+stop_on_error = true
+
+[target]
+features = []
+cpu = "generic"
+triple = ""
+
+[symbols]
+filter_internal = true
+method = "nm"
+demangle = true
+enabled = true
 
 [cache]
 enabled = true
-directory = ".bridge_cache"
+invalidate_on_change = true
+directory = ".jmake_cache"
+
+[wrap]
+add_docs = true
+module_name = "Simple_math"
+add_tests = true
+style = "auto"
+enabled = true
+output_dir = "julia"
+
+[reorganize]
+enabled = false
+
+[project]
+name = "simple_math"
+root = "/home/grim/.julia/julia/JMake/examples/simple_math"
+
+[llvm]
+root = "/home/grim/.julia/julia/JMake/LLVM"
+use_jmake_llvm = true
+isolated = true
+
+    [llvm.tools]
+    llvm_link = "/home/grim/.julia/julia/JMake/LLVM/tools/llvm-link"
+    opt = "/home/grim/.julia/julia/JMake/LLVM/tools/opt"
+    llvm_ar = "/home/grim/.julia/julia/JMake/LLVM/tools/llvm-ar"
+    llvm_config = "/home/grim/.julia/julia/JMake/LLVM/tools/llvm-config"
+    llvm_nm = "/home/grim/.julia/julia/JMake/LLVM/tools/llvm-nm"
+    clang = "/home/grim/.julia/julia/JMake/LLVM/tools/clang++"
+    llc = "/home/grim/.julia/julia/JMake/LLVM/tools/llc"
+
+[test]
+enabled = false
+
+[discovery]
+dependency_graph_file = ".jmake_cache/dependency_graph.json"
+include_dirs = ["/home/grim/.julia/julia/JMake/examples/simple_math", "/home/grim/.julia/julia/JMake/examples/simple_math/include", "/home/grim/.julia/julia/JMake/examples/simple_math/src"]
+enabled = true
+completed = true
+timestamp = "2025-10-03T14:42:59.325"
+
+    [discovery.files]
+    cpp_sources = ["src/math_ops.cpp"]
+    total_scanned = 3
+    cpp_headers = []
+    c_sources = []
+    c_headers = ["include/math_ops.h"]
+
+    [discovery.binaries]
+    static_libs = []
+    shared_libs = []
+    total = 0
+    executables = []

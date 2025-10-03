@@ -124,7 +124,7 @@ end
 # ============================================================================
 
 """
-Parse a CMakeLists.txt file
+Parse a CMakeLists.txt file with multi-line command support
 """
 function parse_cmake_file(filepath::String)
     if !isfile(filepath)
@@ -145,15 +145,14 @@ function parse_cmake_file(filepath::String)
 
     lines = readlines(filepath)
 
-    # Process each line
-    for (line_num, line) in enumerate(lines)
-        # Remove comments
-        comment_idx = findfirst('#', line)
-        if comment_idx !== nothing
-            line = line[1:comment_idx-1]
-        end
+    # Preprocess: merge multi-line commands
+    merged_lines = merge_multiline_commands(lines)
 
-        line = strip(String(line))  # Convert SubString to String
+    # Process each command
+    for line in merged_lines
+        # Remove comments (but preserve # inside strings)
+        line = remove_comments(line)
+        line = strip(String(line))
 
         # Skip empty lines
         if isempty(line)
@@ -173,6 +172,98 @@ function parse_cmake_file(filepath::String)
     end
 
     return project
+end
+
+"""
+Merge multi-line CMake commands into single lines
+Handles commands that span multiple lines with opening ( and closing )
+"""
+function merge_multiline_commands(lines::Vector{String})
+    merged = String[]
+    current_command = ""
+    paren_depth = 0
+    in_command = false
+
+    for line in lines
+        # Check for line continuation with backslash
+        has_continuation = endswith(strip(line), "\\")
+        if has_continuation
+            line = line[1:end-1]  # Remove trailing backslash
+        end
+
+        # Count parentheses (but ignore those in comments and strings)
+        line_cleaned = remove_comments(line)
+
+        for char in line_cleaned
+            if char == '('
+                paren_depth += 1
+                in_command = true
+            elseif char == ')'
+                paren_depth -= 1
+            end
+        end
+
+        # Accumulate the line
+        if in_command || has_continuation
+            current_command *= " " * strip(line)
+        else
+            if !isempty(strip(line))
+                push!(merged, strip(line))
+            end
+        end
+
+        # If parentheses are balanced and no continuation, complete the command
+        if paren_depth == 0 && !has_continuation && in_command
+            push!(merged, strip(current_command))
+            current_command = ""
+            in_command = false
+        end
+    end
+
+    # Add any remaining command
+    if !isempty(strip(current_command))
+        push!(merged, strip(current_command))
+    end
+
+    return merged
+end
+
+"""
+Remove comments from a line, but preserve # inside strings
+"""
+function remove_comments(line::String)
+    result = ""
+    in_string = false
+    escape_next = false
+
+    for (i, char) in enumerate(line)
+        if escape_next
+            result *= char
+            escape_next = false
+            continue
+        end
+
+        if char == '\\'
+            escape_next = true
+            result *= char
+            continue
+        end
+
+        if char == '"'
+            in_string = !in_string
+            result *= char
+            continue
+        end
+
+        if char == '#' && !in_string
+            # Rest of line is comment
+            break
+        end
+
+        result *= char
+    end
+
+    return result
 end
 
 """

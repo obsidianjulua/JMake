@@ -65,3 +65,11 @@ examples/live_test/*.o
 examples/live_test/*.so
 examples/live_test/pthread_test
 examples/live_test/test_*
+
+# LLVM Build Directory (don't ship)
+LLVM/
+
+# Sysimage binaries (don't ship)
+sysimage/*.so
+sysimage/*.dll
+sysimage/*.dylib

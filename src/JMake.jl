@@ -8,23 +8,35 @@ module JMake
 const VERSION = v"0.1.0"
 
 # Load all submodules in the correct order
+include("LLVMEnvironment.jl")  # Load LLVM environment first for toolchain isolation
+include("ConfigurationManager.jl")  # Configuration management
+include("ASTWalker.jl")  # AST dependency analysis
+include("Discovery.jl")  # Discovery pipeline
+include("Templates.jl")
 include("BuildBridge.jl")
 include("CMakeParser.jl")
 include("LLVMake.jl")
 include("JuliaWrapItUp.jl")
+include("ClangJLBridge.jl")
 
 # Re-export submodules
+using .LLVMEnvironment
+using .ConfigurationManager
+using .ASTWalker
+using .Discovery
+using .Templates
 using .BuildBridge
 using .CMakeParser
 using .LLVMake
 using .JuliaWrapItUp
+using .ClangJLBridge
 
 # Load Bridge_LLVM helper functions after modules are available
 # (Bridge_LLVM uses the already-loaded modules above)
 include("Bridge_LLVM.jl")
 
 # Export submodules themselves
-export BuildBridge, CMakeParser, LLVMake, JuliaWrapItUp
+export LLVMEnvironment, ConfigurationManager, ASTWalker, Discovery, Templates, BuildBridge, CMakeParser, LLVMake, JuliaWrapItUp, ClangJLBridge
 
 # Export key types from LLVMake
 export LLVMJuliaCompiler, CompilerConfig, TargetConfig
@@ -34,16 +46,31 @@ export BinaryWrapper, WrapperConfig, BinaryInfo
 
 # Export key functions from BuildBridge
 export execute, capture, find_executable, command_exists
-export discover_llvm_tools, compile_with_analysis
+export discover_llvm_tools, compile_with_learning
+export get_error_db, export_error_log, get_error_stats
 
 # Export key functions from CMakeParser
 export parse_cmake_file, CMakeProject, CMakeTarget
+export to_jmake_config, write_jmake_config
+
+# Export JMake high-level functions
+export init, compile, wrap, wrap_binary, discover_tools
+export import_cmake, export_errors, info, help, scan, analyze
+
+# Export Discovery pipeline
+export discover
+
+# Export LLVM environment functions
+export get_toolchain, verify_toolchain, print_toolchain_info, with_llvm_env
 
 # Export key functions from LLVMake
 export compile_project
 
 # Export key functions from JuliaWrapItUp
 export generate_wrappers, scan_binaries
+
+# Export key functions from ClangJLBridge
+export generate_bindings_clangjl, generate_from_config
 
 """
     init(project_dir::String="."; type::Symbol=:cpp)
@@ -121,7 +148,7 @@ JMake.compile("custom_config.toml")
 function compile(config_file::String="jmake.toml")
     println("🚀 JMake - Compiling project")
     config = BridgeCompilerConfig(config_file)
-    compile_bridge_project(config)
+    compile_project(config)
 end
 
 """
@@ -168,7 +195,7 @@ end
 """
     discover_tools(config_file::String="jmake.toml")
 
-Discover LLVM/Clang tools available on the system using UnifiedBridge.
+Discover LLVM/Clang tools available on the system using BuildBridge.
 
 # Arguments
 - `config_file::String`: Path to jmake.toml configuration file
@@ -181,7 +208,7 @@ JMake.discover_tools()
 function discover_tools(config_file::String="jmake.toml")
     println("🔍 JMake - Discovering LLVM tools")
     config = BridgeCompilerConfig(config_file)
-    discover_bridge_tools!(config)
+    discover_tools!(config)
 end
 
 """
@@ -233,6 +260,53 @@ function import_cmake(cmake_file::String="CMakeLists.txt"; target::String="", ou
 end
 
 """
+    export_errors(output_path::String="error_log.md")
+
+Export error learning database to Obsidian-friendly markdown.
+
+# Examples
+```julia
+JMake.export_errors("docs/errors.md")
+```
+"""
+function export_errors(output_path::String="error_log.md")
+    BuildBridge.export_error_log("jmake_errors.db", output_path)
+end
+
+"""
+    scan(path="."; generate_config=true, output="jmake.toml")
+
+Scan a directory and analyze its structure for JMake compilation.
+Auto-generates jmake.toml if generate_config=true.
+
+# Examples
+```julia
+JMake.scan()  # Scan current directory
+JMake.scan("path/to/project")  # Scan specific directory
+JMake.scan(".", generate_config=false)  # Just analyze, don't generate config
+JMake.scan(".", output="my_config.toml")  # Custom output name
+```
+"""
+function scan(path="."; generate_config=true, output="jmake.toml")
+    Templates.scan_project(path; generate_config=generate_config, output=output)
+end
+
+"""
+    analyze(path=".")
+
+Analyze project structure and return detailed analysis.
+
+# Examples
+```julia
+result = JMake.analyze("path/to/project")
+println("Found \$(length(result.files.cpp_sources)) C++ files")
+```
+"""
+function analyze(path=".")
+    Templates.analyze_project(path)
+end
+
+"""
     info()
 
 Display information about the JMake build system.
@@ -247,7 +321,7 @@ function info()
     ╚══════════════════════════════════════════════════════════════╝
 
     Components:
-    • BuildBridge     - Simple command execution and tool discovery
+    • BuildBridge     - Command execution with error learning
     • CMakeParser     - Import CMake projects without running CMake
     • LLVMake         - C++ source → Julia compiler
     • JuliaWrapItUp   - Binary → Julia wrapper generator

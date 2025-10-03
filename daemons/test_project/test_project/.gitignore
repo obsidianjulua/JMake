@@ -1,0 +1,6 @@
+build/
+.jmake_cache/
+*.so
+*.o
+*.ir
+*.bc

@@ -9,7 +9,7 @@ using JSON
 using Dates
 
 # Use already-loaded modules from parent JMake module
-# (BuildBridge, LLVMake, JuliaWrapItUp are loaded by JMake.jl)
+# (BuildBridge, CMakeParser, LLVMake, JuliaWrapItUp are loaded by JMake.jl)
 
 """
 Enhanced compiler configuration with BuildBridge integration
@@ -30,13 +30,12 @@ mutable struct BridgeCompilerConfig
     enable_learning::Bool
     cache_tools::Bool
 
-    # Discovered tools (populated by UnifiedBridge)
+    # Discovered tools (populated by BuildBridge)
     tools::Dict{String,String}
 
     # Compilation settings
     compile_flags::Vector{String}
     defines::Dict{String,String}
-    link_libraries::Vector{String}
     walk_dependencies::Bool
     max_depth::Int
 
@@ -54,6 +53,9 @@ mutable struct BridgeCompilerConfig
     cache_enabled::Bool
     cache_dir::String
 
+    # Binding generation settings
+    binding_style::String  # "auto", "clangjl", "basic"
+
     function BridgeCompilerConfig(config_file::String="jmake.toml")
         if !isfile(config_file)
             error("Config file not found: $config_file")
@@ -69,6 +71,7 @@ mutable struct BridgeCompilerConfig
         target = get(data, "target", Dict())
         workflow = get(data, "workflow", Dict())
         cache = get(data, "cache", Dict())
+        binding = get(data, "binding", Dict())
 
         config = new(
             get(project, "name", "MyProject"),
@@ -76,14 +79,13 @@ mutable struct BridgeCompilerConfig
             get(paths, "source", "src"),
             get(paths, "output", "julia"),
             get(paths, "build", "build"),
-            get(paths, "include", String[]),
+            get(compile, "include_dirs", String[]),  # Fixed: read from compile section
             get(bridge, "auto_discover", true),
             get(bridge, "enable_learning", true),
             get(bridge, "cache_tools", true),
             Dict{String,String}(),  # tools - populated later
             get(compile, "flags", String[]),
             get(compile, "defines", Dict{String,String}()),
-            get(compile, "link_libraries", String[]),
             get(compile, "walk_dependencies", true),
             get(compile, "max_depth", 10),
             get(target, "triple", ""),
@@ -93,7 +95,8 @@ mutable struct BridgeCompilerConfig
             get(workflow, "stages", String[]),
             get(workflow, "parallel", true),
             get(cache, "enabled", true),
-            get(cache, "directory", ".bridge_cache")
+            get(cache, "directory", ".bridge_cache"),
+            get(binding, "style", "auto")  # "auto", "clangjl", "basic"
         )
 
         return config
@@ -103,7 +106,7 @@ end
 """
 Discover LLVM toolchain using BuildBridge
 """
-function discover_bridge_tools!(config::BridgeCompilerConfig)
+function discover_tools!(config::BridgeCompilerConfig)
     println("🔍 Discovering LLVM tools via BuildBridge...")
 
     required_tools = [
@@ -373,55 +376,46 @@ function create_library(config::BridgeCompilerConfig, ir_file::String, lib_name:
 end
 
 """
-Create executable via BuildBridge
+Discover header files in project for Clang.jl binding generation
 """
-function create_executable(config::BridgeCompilerConfig, ir_file::String, exe_name::String)
-    println("🔨 Creating executable...")
+function discover_project_headers(config::BridgeCompilerConfig)
+    headers = String[]
 
-    mkpath(config.output_dir)
-    exe_path = joinpath(config.output_dir, exe_name)
+    # Search source directory
+    if isdir(config.source_dir)
+        for (root, dirs, files) in walkdir(config.source_dir)
+            # Skip build directories
+            filter!(d -> !in(d, ["build", ".git", ".cache", ".bridge_cache"]), dirs)
 
-    # Build command
-    cmd_args = ["-o", exe_path, ir_file]
-
-    if config.enable_lto
-        push!(cmd_args, "-flto")
-    end
-
-    # Add library search path (for locally built libs)
-    lib_dir = joinpath(config.project_root, "julia")
-    if isdir(lib_dir)
-        push!(cmd_args, "-L$lib_dir")
-        # Add rpath so executable can find the library at runtime
-        push!(cmd_args, "-Wl,-rpath,$lib_dir")
-    end
-
-    # Add link libraries
-    # Common system libraries
-    link_libs = ["-lm", "-lpthread"]
-    append!(cmd_args, link_libs)
-
-    # Add libraries from config
-    for lib in config.link_libraries
-        # If it's a custom library (like mathlib), add -l prefix
-        if !startswith(lib, "-")
-            push!(cmd_args, "-l$lib")
-        else
-            push!(cmd_args, lib)
+            for file in files
+                ext = lowercase(splitext(file)[2])
+                if ext in [".h", ".hpp", ".hxx", ".h++", ".hh"]
+                    push!(headers, abspath(joinpath(root, file)))
+                end
+            end
         end
     end
 
-    (output, exitcode) = BuildBridge.execute("clang++", cmd_args)
+    # Search include directories
+    for inc_dir in config.include_dirs
+        if isdir(inc_dir)
+            for (root, dirs, files) in walkdir(inc_dir)
+                filter!(d -> !in(d, ["build", ".git", ".cache", ".bridge_cache"]), dirs)
 
-    if isfile(exe_path)
-        # Make executable
-        chmod(exe_path, 0o755)
-        println("  ✅ Created: $exe_path")
-        return exe_path
+                for file in files
+                    ext = lowercase(splitext(file)[2])
+                    if ext in [".h", ".hpp", ".hxx", ".h++", ".hh"]
+                        header_path = abspath(joinpath(root, file))
+                        if !in(header_path, headers)
+                            push!(headers, header_path)
+                        end
+                    end
+                end
+            end
+        end
     end
 
-    @warn "  ❌ Executable creation failed\n$output"
-    return nothing
+    return headers
 end
 
 """
@@ -457,9 +451,197 @@ function extract_symbols(config::BridgeCompilerConfig, binary_path::String)
 end
 
 """
+Generate Julia bindings from symbols and function info
+"""
+function generate_julia_bindings(config::BridgeCompilerConfig, lib_path::String,
+                                  symbols::Vector{Dict{String,Any}},
+                                  functions::Vector)::Union{String,Nothing}
+    println("\n📝 Generating Julia bindings...")
+
+    if isempty(symbols)
+        println("  ⚠️  No symbols to wrap")
+        return nothing
+    end
+
+    # Create output directory
+    mkpath(config.output_dir)
+
+    # Generate module name from project name
+    module_name = replace(config.project_name, r"[^a-zA-Z0-9_]" => "_")
+    module_name = uppercase(module_name[1:1]) * module_name[2:end]
+
+    bindings_file = joinpath(config.output_dir, "$(module_name).jl")
+    lib_name = "lib$(config.project_name)"
+
+    open(bindings_file, "w") do f
+        # Module header
+        write(f, """
+        # Auto-generated Julia bindings for $(config.project_name)
+        # Generated: $(Dates.now())
+        # Library: $(basename(lib_path))
+
+        module $module_name
+
+        # Library path
+        const LIB_PATH = "$(abspath(lib_path))"
+
+        # Verify library exists
+        if !isfile(LIB_PATH)
+            error("Library not found: \$LIB_PATH")
+        end
+
+        """)
+
+        # Generate wrappers for each symbol
+        for sym in symbols
+            name = sym["name"]
+
+            # Skip symbols starting with underscore (internal)
+            if startswith(name, "_")
+                continue
+            end
+
+            # Try to infer type from function info if available
+            sig = nothing
+            if !isempty(functions)
+                for func in functions
+                    if get(func, "name", "") == name
+                        sig = func
+                        break
+                    end
+                end
+            end
+
+            # Generate wrapper
+            if !isnothing(sig) && haskey(sig, "return_type") && haskey(sig, "parameters")
+                # We have type information!
+                ret_type = julia_type_from_cpp(sig["return_type"])
+                params = sig["parameters"]
+
+                # Build parameter list
+                param_names = String[]
+                param_types = String[]
+                ccall_types = String[]
+
+                for (i, param) in enumerate(params)
+                    param_name = get(param, "name", "arg$i")
+                    cpp_type = get(param, "type", "void*")
+                    jl_type = julia_type_from_cpp(cpp_type)
+
+                    push!(param_names, param_name)
+                    push!(param_types, "$param_name::$jl_type")
+                    push!(ccall_types, jl_type)
+                end
+
+                # Generate function with types
+                params_str = join(param_types, ", ")
+                ccall_types_str = join(ccall_types, ", ")
+                args_str = join(param_names, ", ")
+
+                write(f, """
+                \"\"\"
+                    $name($params_str)
+
+                Auto-generated wrapper for C++ function: $name
+                \"\"\"
+                function $name($params_str)::$ret_type
+                    ccall((:$name, LIB_PATH), $ret_type, ($ccall_types_str), $args_str)
+                end
+
+                """)
+            else
+                # No type info - generate generic wrapper with comment
+                write(f, """
+                # $name - type information not available
+                # Usage: ccall((:$name, $module_name.LIB_PATH), RetType, (ArgTypes...), args...)
+
+                """)
+            end
+        end
+
+        # Export only valid Julia identifiers (no special characters)
+        # Valid Julia identifier: starts with letter/underscore, contains only alphanumeric/underscore
+        is_valid_identifier(name) = !isempty(name) && match(r"^[a-zA-Z_][a-zA-Z0-9_!]*$", name) !== nothing
+
+        exported_funcs = [sym["name"] for sym in symbols
+                         if !startswith(sym["name"], "_") && is_valid_identifier(sym["name"])]
+
+        if !isempty(exported_funcs)
+            write(f, "\n# Exports (only valid Julia identifiers)\n")
+            write(f, "export ")
+            write(f, join(exported_funcs, ", "))
+            write(f, "\n")
+        end
+
+        # Note about mangled names
+        non_exported = count(s -> !startswith(s["name"], "_") && !is_valid_identifier(s["name"]), symbols)
+        if non_exported > 0
+            write(f, "\n# Note: $non_exported symbols with C++ mangled names are available via ccall\n")
+            write(f, "# but cannot be exported as Julia identifiers.\n")
+        end
+
+        write(f, "\nend # module $module_name\n")
+    end
+
+    println("  ✅ Generated: $(bindings_file)")
+    println("  📦 Module: $module_name")
+    println("  🔧 Functions: $(count(s -> !startswith(s["name"], "_"), symbols))")
+
+    return bindings_file
+end
+
+"""
+Convert C++ type to Julia type
+"""
+function julia_type_from_cpp(cpp_type::String)::String
+    cpp_type = strip(replace(cpp_type, r"\s+" => " "))
+
+    # Basic types
+    type_map = Dict(
+        "void" => "Cvoid",
+        "bool" => "Bool",
+        "char" => "Cchar",
+        "unsigned char" => "Cuchar",
+        "short" => "Cshort",
+        "unsigned short" => "Cushort",
+        "int" => "Cint",
+        "unsigned int" => "Cuint",
+        "long" => "Clong",
+        "unsigned long" => "Culong",
+        "long long" => "Clonglong",
+        "unsigned long long" => "Culonglong",
+        "float" => "Cfloat",
+        "double" => "Cdouble",
+        "size_t" => "Csize_t",
+        "int32_t" => "Int32",
+        "int64_t" => "Int64",
+        "uint32_t" => "UInt32",
+        "uint64_t" => "UInt64"
+    )
+
+    # Handle pointers
+    if contains(cpp_type, "*")
+        base_type = replace(cpp_type, "*" => "")
+        base_type = strip(base_type)
+
+        if base_type == "char" || base_type == "const char"
+            return "Cstring"
+        else
+            return "Ptr{Cvoid}"
+        end
+    end
+
+    # Handle const
+    cpp_type = replace(cpp_type, "const " => "")
+    cpp_type = strip(cpp_type)
+
+    return get(type_map, cpp_type, "Cvoid")
+end
+
+"""
 Main compilation pipeline
 """
-function compile_bridge_project(config::BridgeCompilerConfig)
+function compile_project(config::BridgeCompilerConfig)
     println("🚀 JMake Bridge LLVM - Unified Build System")
     println("=" ^ 60)
     println("📁 Project: $(config.project_name)")
@@ -469,7 +651,7 @@ function compile_bridge_project(config::BridgeCompilerConfig)
 
     # Stage 1: Discover tools
     if "discover_tools" in config.stages
-        discover_bridge_tools!(config)
+        discover_tools!(config)
     end
 
     # Find C++ sources
@@ -514,7 +696,7 @@ function compile_bridge_project(config::BridgeCompilerConfig)
 
     # Stage 4: Compile to IR
     ir_files = String[]
-    if "compile_to_ir" in config.stages
+    if "compile" in config.stages || "compile_to_ir" in config.stages
         ir_files = compile_to_ir(config, cpp_files)
     end
 
@@ -525,7 +707,7 @@ function compile_bridge_project(config::BridgeCompilerConfig)
 
     # Stage 5: Link and optimize
     optimized_ir = nothing
-    if "link_ir" in config.stages || "optimize_ir" in config.stages
+    if "link" in config.stages || "link_ir" in config.stages || "optimize_ir" in config.stages
         optimized_ir = link_optimize_ir(config, ir_files, config.project_name)
     end
 
@@ -534,51 +716,78 @@ function compile_bridge_project(config::BridgeCompilerConfig)
         return nothing
     end
 
-    # Stage 6: Create library or executable
-    output_path = nothing
-    if "create_library" in config.stages
-        output_path = create_library(config, optimized_ir, config.project_name)
-        if isnothing(output_path)
-            println("❌ Library creation failed")
-            return nothing
-        end
-    elseif "create_executable" in config.stages
-        output_path = create_executable(config, optimized_ir, config.project_name)
-        if isnothing(output_path)
-            println("❌ Executable creation failed")
-            return nothing
-        end
+    # Stage 6: Create library
+    lib_path = nothing
+    if "binary" in config.stages || "create_library" in config.stages
+        lib_path = create_library(config, optimized_ir, config.project_name)
     end
 
-    # Stage 7: Extract symbols (only for libraries)
+    if isnothing(lib_path)
+        println("❌ Library creation failed")
+        return nothing
+    end
+
+    # Stage 7: Extract symbols
     symbols = []
-    if "extract_symbols" in config.stages && !isnothing(output_path)
-        symbols = extract_symbols(config, output_path)
+    if "symbols" in config.stages || "extract_symbols" in config.stages
+        symbols = extract_symbols(config, lib_path)
     end
 
     # Stage 8: Generate bindings
-    if "generate_bindings" in config.stages
-        println("\n📝 Generating Julia bindings...")
-        # Use llvm_julia.jl's binding generator
-        # (Implementation would call generate_julia_bindings)
+    bindings_file = nothing
+    if "wrap" in config.stages || "generate_bindings" in config.stages
+        # Determine binding style
+        style = config.binding_style
+
+        # Auto-detect: prefer Clang.jl if available
+        if style == "auto"
+            style = "clangjl"  # Try Clang.jl first
+        end
+
+        if style == "clangjl"
+            # Use Clang.jl for type-aware bindings
+            println("\n📝 Using Clang.jl for binding generation...")
+
+            try
+                # Discover header files
+                headers = discover_project_headers(config)
+
+                if !isempty(headers)
+                    # Load TOML data for ClangJLBridge
+                    config_data = TOML.parsefile(joinpath(config.project_root, "jmake_auto.toml"))
+
+                    # Generate with Clang.jl
+                    bindings_file = ClangJLBridge.generate_bindings_clangjl(
+                        config_data, lib_path, headers
+                    )
+                else
+                    @warn "No headers found for Clang.jl, falling back to basic bindings"
+                    bindings_file = generate_julia_bindings(config, lib_path, symbols, all_functions)
+                end
+            catch e
+                @warn "Clang.jl binding generation failed: $e\nFalling back to basic bindings"
+                bindings_file = generate_julia_bindings(config, lib_path, symbols, all_functions)
+            end
+        else
+            # Use basic binding generation
+            bindings_file = generate_julia_bindings(config, lib_path, symbols, all_functions)
+        end
     end
 
-    # Show build summary
+    # Show error learning statistics
     if config.enable_learning
-        println("\n📊 BuildBridge Summary:")
-        println("  Compiler: $(BuildBridge.get_compiler_info("clang++"))")
-        println("  LLVM Version: $(BuildBridge.get_llvm_version())")
+        println("\n📊 Error Learning Statistics:")
+        stats = BuildBridge.get_error_stats()
+        println("  Total errors recorded: $(stats["total_errors"])")
+        println("  Successful fixes: $(stats["successful_fixes"])")
+        println("  Success rate: $(round(stats["success_rate"] * 100, digits=1))%")
     end
 
     println("\n🎉 Compilation complete!")
-    if "create_library" in config.stages
-        println("📦 Library: $output_path")
-        println("🔧 Symbols: $(length(symbols))")
-    elseif "create_executable" in config.stages
-        println("🔨 Executable: $output_path")
-    end
+    println("📦 Library: $lib_path")
+    println("🔧 Symbols: $(length(symbols))")
 
-    return output_path
+    return lib_path
 end
 
 """
@@ -606,18 +815,25 @@ function main()
     if command == "compile"
         config_file = length(ARGS) >= 2 ? ARGS[2] : "jmake.toml"
         config = BridgeCompilerConfig(config_file)
-        compile_bridge_project(config)
+        compile_project(config)
 
     elseif command == "discover"
         config_file = length(ARGS) >= 2 ? ARGS[2] : "jmake.toml"
         config = BridgeCompilerConfig(config_file)
-        discover_bridge_tools!(config)
+        discover_tools!(config)
 
     elseif command == "stats"
-        println("📊 BuildBridge Statistics")
+        stats = BuildBridge.get_error_stats()
+        println("📊 Error Learning Statistics")
         println("=" ^ 50)
-        println("Compiler: $(BuildBridge.get_compiler_info("clang++"))")
-        println("LLVM Version: $(BuildBridge.get_llvm_version())")
+        println("Total Errors: $(stats["total_errors"])")
+        println("Total Fixes Attempted: $(stats["total_fixes"])")
+        println("Successful Fixes: $(stats["successful_fixes"])")
+        println("Success Rate: $(round(stats["success_rate"] * 100, digits=1))%")
+        println("\nCommon Error Patterns:")
+        for row in eachrow(stats["common_patterns"])
+            println("  - $(row.error_pattern): $(row.count) occurrences")
+        end
 
     else
         println("Unknown command: $command")

@@ -1,338 +1,285 @@
-# JMake
+# JMake.jl
 
-**A TOML-based build system leveraging LLVM/Clang for automatic Julia bindings generation**
+> A TOML-based build system leveraging LLVM/Clang for automatic Julia bindings generation
 
-JMake is a unique build system that doesn't replace traditional build systems like CMake or Make. Instead, it leverages the same tools they use (LLVM, Clang) directly from Julia to automatically generate type-safe Julia bindings for C++ code and existing binaries.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Julia 1.11+](https://img.shields.io/badge/julia-1.11+-blue.svg)](https://julialang.org)
 
-## Features
+## Overview
 
-- 🚀 **Single TOML Configuration** - No complex CMakeLists.txt or Makefiles
-- 🔍 **Auto-Discovery** - Automatically finds LLVM/Clang tools via BuildBridge
-- 🧠 **Error Learning** - Learns from compilation errors to improve success rates
-- 📦 **CMake Import** - Import existing CMake projects without running CMake
-- 📦 **Dual Mode** - Compile C++ source OR wrap existing binaries
-- 🎯 **Type-Safe** - AST-based parsing for accurate type mapping
-- ⚡ **LLVM IR Pipeline** - Full control over optimization and linking
-- 🔗 **No Boilerplate** - No manual `ccall` or wrapper code needed
+JMake is a comprehensive build system that bridges C++ and Julia by automatically generating high-quality Julia bindings from C++ source code or binary libraries. It leverages LLVM/Clang tooling to provide a seamless workflow for Julia developers who need to interface with C++ code.
 
-## Architecture
+## Key Features
 
-JMake consists of five integrated components:
-
-1. **BuildBridge** - Simple command execution and tool discovery with error learning
-2. **CMakeParser** - Import CMake projects without running CMake
-3. **LLVMake** - C++ source → Julia compiler (Stage 1)
-4. **JuliaWrapItUp** - Binary → Julia wrapper generator (Stage 2)
-5. **Bridge_LLVM** - Orchestrator that integrates all components
-
-```
-CMakeLists.txt ──→ [CMakeParser] ──→ jmake.toml
-                                          ↓
-C++ Source ──→ [LLVMake] ──→ LLVM IR ──→ Shared Library ──→ Julia Bindings
-                   ↓                           ↓
-              AST Parse              [JuliaWrapItUp]
-                                           ↓
-Binary/Library ─────────────────────→ Julia Wrappers
-           ↑
-    [BuildBridge] - Tool discovery, execution, error learning
-```
-
-## Installation
-
-```julia
-julia> ] add /path/to/JMake  # Local development
-
-# Or activate the project
-julia> ] activate /path/to/JMake
-julia> using JMake
-```
+- 🚀 **Automatic Bindings Generation**: Convert C++ source code or binary libraries to Julia bindings
+- 📦 **CMake Integration**: Import existing CMake projects without running CMake
+- 🔧 **LLVM Toolchain**: Isolated LLVM environment with 137+ tools for advanced workflows
+- 🎯 **Smart Discovery**: Automatic project structure analysis and configuration
+- 📊 **Error Learning**: SQLite-backed error tracking and learning system
+- ⚡ **Daemon Architecture**: High-performance background build system with job queue
+- 🔄 **Incremental Builds**: Efficient recompilation with dependency tracking
 
 ## Quick Start
 
-### Compile C++ to Julia
+### Installation
+
+```julia
+using Pkg
+Pkg.add(url="https://github.com/yourusername/JMake.jl")
+```
+
+### Simple Example
 
 ```julia
 using JMake
 
-# 1. Initialize a new C++ project
-JMake.init("mymath")
-cd("mymath")
+# Initialize a new C++ project
+JMake.init("myproject")
+cd("myproject")
 
-# 2. Add your C++ code to src/
-# src/math.cpp:
-# double fast_sqrt(double x) { return std::sqrt(x); }
+# Add your C++ files to src/
+# Configure jmake.toml
 
-# 3. Configure (edit jmake.toml if needed)
-
-# 4. Compile
+# Compile to Julia bindings
 JMake.compile()
 
-# 5. Use the generated bindings
-include("julia/mymath.jl")
-result = fast_sqrt(16.0)  # → 4.0
+# Use the generated bindings
+include("julia/MyProject.jl")
+using .MyProject
 ```
 
-### Wrap Existing Binary
+## Documentation
+
+Full documentation is available at [https://yourusername.github.io/JMake.jl](https://yourusername.github.io/JMake.jl) or build locally:
+
+```bash
+cd docs
+julia --project
+```
 
 ```julia
-using JMake
-
-# 1. Initialize a binary wrapping project
-JMake.init("crypto_bindings", type=:binary)
-cd("crypto_bindings")
-
-# 2. Wrap a shared library
-JMake.wrap_binary("/usr/lib/libcrypto.so")
-
-# 3. Use the generated wrappers
-include("julia_wrappers/Crypto.jl")
+using Pkg
+Pkg.instantiate()
+include("make.jl")
 ```
 
-## Configuration
+### Quick Links
 
-### jmake.toml (Main Configuration)
+- [Installation Guide](docs/src/guides/installation.md)
+- [Quick Start Tutorial](docs/src/guides/quickstart.md)
+- [API Reference](docs/src/api/jmake.md)
+- [Examples](docs/src/examples/basic_cpp.md)
+- [Architecture](docs/src/architecture/overview.md)
 
-```toml
-[project]
-name = "MyProject"
-root = "."
+## Features in Detail
 
-[paths]
-source = "src"
-output = "julia"
-build = "build"
+### C++ Source Compilation
 
-[bridge]
-auto_discover = true    # Let BuildBridge find tools
-enable_learning = true  # Enable error learning
-
-[compile]
-flags = ["-O2", "-fPIC", "-std=c++17"]
-walk_dependencies = true  # Auto-discover includes
-
-[target]
-cpu = "native"
-opt_level = "O2"
-lto = true
-
-[bindings]
-style = "simple"  # simple, advanced, cxxwrap
-generate_tests = true
-generate_docs = true
-```
-
-See [jmake.toml](jmake.toml) for full configuration options.
-
-## API Reference
-
-### Project Management
+Compile C++ source code directly to Julia-compatible shared libraries:
 
 ```julia
-JMake.init([dir]; type=:cpp)       # Initialize new project
-JMake.info()                        # Show JMake information
-JMake.help()                        # Show help
-```
+# Initialize C++ project
+JMake.init("mathlib")
 
-### C++ Compilation
+# Add C++ sources to src/
+# Configure jmake.toml
 
-```julia
-JMake.compile([config])             # Compile entire project
-JMake.discover_tools([config])      # Discover LLVM tools
+# Compile
+JMake.compile()
 ```
 
 ### Binary Wrapping
 
-```julia
-JMake.wrap([config])                # Wrap all binaries
-JMake.wrap_binary(path; config)     # Wrap specific binary
-```
-
-### CMake Import
+Wrap existing binary libraries without source code:
 
 ```julia
-JMake.import_cmake([file]; target, output)  # Import CMake project
-```
+# Initialize wrapper project
+JMake.init("ssl_wrapper", type=:binary)
 
-### Direct Module Access
-
-```julia
-using JMake
-
-# Access submodules directly
-compiler = LLVMake.LLVMJuliaCompiler("jmake.toml")
-wrapper = JuliaWrapItUp.BinaryWrapper("wrapper_config.toml")
-
-# Use BuildBridge for commands
-output, exitcode = BuildBridge.execute("clang++", ["--version"])
-tools = BuildBridge.discover_llvm_tools()
-```
-
-## Advanced Features
-
-### Dependency Walking
-
-JMake automatically walks your C++ dependency tree:
-
-```julia
-# Automatically finds all #include files
-# Uses clang -M for accurate dependency detection
-# Handles circular dependencies with max_depth limit
-```
-
-### AST-Based Parsing
-
-```julia
-# Extracts function signatures directly from Clang AST
-# Accurate type information without manual parsing
-# Supports C++ templates, namespaces, overloading
-```
-
-### Error Learning System
-
-BuildBridge learns from compilation errors and suggests fixes:
-
-```julia
-# Automatically learns from errors
-# - Tracks common compiler errors
-# - Suggests fixes based on patterns
-# - Stores solutions in SQLite database
-# - Improves compilation success over time
-
-# Example: Missing include path
-# Error: "fatal error: 'vector' file not found"
-# → Learns to add -I/usr/include/c++/... flag
+# Wrap library
+JMake.wrap_binary("/usr/lib/libssl.so")
 ```
 
 ### CMake Project Import
 
-Import existing CMake projects without running CMake:
+Import CMake projects without needing CMake installed:
 
 ```julia
-# Parse CMakeLists.txt directly
-JMake.import_cmake("path/to/CMakeLists.txt")
+# Import CMake project
+JMake.import_cmake("third_party/CMakeLists.txt")
 
-# Import specific target
-JMake.import_cmake("CMakeLists.txt", target="mylib")
-
-# Generates jmake.toml with:
-# - Source files
-# - Include directories
-# - Compiler flags
-# - Dependencies
+# Compile imported project
+JMake.compile()
 ```
 
-### Parallel Compilation
+### Error Learning System
 
-```toml
-[workflow]
-parallel = true
-jobs = 0  # Auto-detect CPU cores
-```
-
-### Custom Type Mappings
-
-```toml
-[bindings.type_mappings]
-"std::string" = "String"
-"std::vector<double>" = "Vector{Float64}"
-"std::shared_ptr<T>" = "Ref{T}"
-```
-
-## Workflow Stages
-
-JMake compilation pipeline:
-
-1. **discover_tools** - Find LLVM/Clang via BuildBridge
-2. **walk_deps** - Walk dependency tree with `clang -M`
-3. **parse_ast** - Extract functions with `clang -ast-dump=json`
-4. **compile_to_ir** - Compile C++ → LLVM IR
-5. **optimize_ir** - Optimize with `opt`
-6. **link_ir** - Link with `llvm-link`
-7. **create_library** - Create `.so` with `clang++`
-8. **extract_symbols** - Get exports with `nm`
-9. **generate_bindings** - Create Julia wrappers
-10. **generate_tests** - Create test suite
-11. **generate_docs** - Generate documentation
-12. **error_learning** - Learn from errors for future builds
-
-## Comparison
-
-### vs CMake/Make
-- ✅ Single TOML config (not 1000 lines of CMakeLists.txt)
-- ✅ No platform-specific conditionals
-- ✅ Auto-discovers tools
-- ✅ Direct Julia integration
-
-### vs Manual ccall
-- ✅ Automatic binding generation
-- ✅ Type inference from AST
-- ✅ Safety checks
-- ✅ Documentation generation
-
-### vs BinaryBuilder.jl
-- ✅ Works with local development (not just distribution)
-- ✅ Instant iteration (no Docker)
-- ✅ Direct LLVM access
-
-### vs CxxWrap.jl
-- ✅ No C++ boilerplate (`JLCXX_MODULE`)
-- ✅ Works with existing code
-- ✅ Handles both C and C++
-
-## Examples
-
-See the [examples/](examples/) directory for working examples:
-
-- **[simple_math](examples/simple_math/)** - Minimal C++ project (5 functions, fully tested ✅)
-- **[cmake_import](examples/cmake_import/)** - CMake project import example
-- [BRIDGE_INTEGRATION.md](docs/BRIDGE_INTEGRATION.md) - Complete integration guide
-- [ERROR_LEARNING.md](docs/ERROR_LEARNING.md) - Error learning system documentation
-
-### Verified Test Results
-
-JMake has been tested and verified with a real C++ project:
+Automatically learn from compilation errors:
 
 ```julia
-# Compiled with: JMake.compile()
-✅ fast_sqrt(16.0) → 4.0
-✅ fast_sin(0.0) → 0.0
-✅ fast_pow(2.0, 3.0) → 8.0
-✅ add(5, 3) → 8
-✅ multiply(4, 7) → 28
+# Errors are automatically logged and analyzed
+JMake.compile()  # May fail with error
+
+# View similar past errors and solutions
+JMake.get_error_stats()
+
+# Export error log
+JMake.export_errors("errors.md")
 ```
 
-All functions compiled successfully from C++ → LLVM IR → Shared Library → Julia!
+### Daemon System
+
+Background build system for continuous compilation:
+
+```bash
+cd daemons
+./start_all.sh  # Start daemon system
+./status.sh     # Check status
+./stop_all.sh   # Stop daemons
+```
+
+## Project Structure
+
+```
+JMake/
+├── src/                    # Core modules
+│   ├── JMake.jl           # Main module
+│   ├── LLVMEnvironment.jl # LLVM toolchain management
+│   ├── LLVMake.jl         # C++ compiler
+│   ├── JuliaWrapItUp.jl   # Binary wrapper generator
+│   ├── Discovery.jl       # Project discovery
+│   ├── ASTWalker.jl       # C++ AST analysis
+│   ├── CMakeParser.jl     # CMake parsing
+│   ├── BuildBridge.jl     # Command execution
+│   └── ErrorLearning.jl   # Error intelligence
+├── daemons/               # Daemon system
+│   ├── servers/          # Daemon servers
+│   ├── clients/          # Client utilities
+│   └── handlers/         # Event handlers
+├── docs/                  # Documentation
+├── test/                  # Test suite
+└── examples/             # Example projects
+```
+
+## Components
+
+### Core Modules
+
+- **LLVMEnvironment**: Isolated LLVM toolchain management
+- **ConfigurationManager**: TOML-based project configuration
+- **Discovery**: Automatic project structure analysis
+- **ASTWalker**: C++ AST dependency analysis
+- **CMakeParser**: CMake project parsing and conversion
+
+### Build Pipeline
+
+- **LLVMake**: C++ source → Julia compiler
+- **JuliaWrapItUp**: Binary → Julia wrapper generator
+- **BuildBridge**: Command execution with error learning
+- **ClangJLBridge**: Clang.jl integration for binding generation
+
+### Advanced Features
+
+- **Daemon System**: Background compilation with job queue
+- **Error Learning**: Automated error pattern recognition
+- **Sysimage Support**: Custom Julia sysimages for faster startup
 
 ## Requirements
 
-- Julia 1.6+
-- LLVM/Clang toolchain (auto-discovered)
-- Linux/macOS (Windows support planned)
+- Julia 1.11.7 or later
+- LLVM/Clang toolchain (optional - can use bundled version)
+- Git (for repository management)
 
-## Development
+## Examples
 
-```bash
-git clone <repo>
-cd JMake
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
-julia --project=. -e 'using JMake; JMake.info()'
+### Basic Math Library
+
+```cpp
+// src/math.cpp
+extern "C" {
+    double add(double a, double b) { return a + b; }
+    double multiply(double a, double b) { return a * b; }
+}
 ```
 
-## License
+```julia
+# Compile
+JMake.compile()
 
-[License information to be added]
+# Use
+include("julia/MathLib.jl")
+using .MathLib
+result = add(5.0, 3.0)  # 8.0
+```
+
+See [examples/](examples/) for more comprehensive examples.
+
+## Testing
+
+Run the test suite:
+
+```julia
+using Pkg
+Pkg.test("JMake")
+```
+
+Or manually:
+
+```julia
+include("test/runtests.jl")
+```
 
 ## Contributing
 
-[Contributing guidelines to be added]
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+### Development Setup
+
+```bash
+git clone https://github.com/yourusername/JMake.jl.git
+cd JMake.jl
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
+julia --project=. test/runtests.jl
+```
+
+## Roadmap
+
+- [ ] Plugin system for custom backends
+- [ ] Distributed compilation support
+- [ ] Cloud-based LLVM toolchain
+- [ ] Support for Rust, Go bridges
+- [ ] GUI configuration tool
+- [ ] Package registry integration
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
-JMake leverages the incredible work of:
-- The Julia Language team
-- LLVM/Clang developers
-- The Julia C/C++ interop ecosystem
+- Built on top of [Clang.jl](https://github.com/JuliaInterop/Clang.jl)
+- Uses [CxxWrap.jl](https://github.com/JuliaInterop/CxxWrap.jl) for C++ wrapping
+- LLVM project for the amazing toolchain
+
+## Citation
+
+If you use JMake in your research, please cite:
+
+```bibtex
+@software{jmake2024,
+  title = {JMake.jl: LLVM-based Build System for Julia-C++ Interop},
+  author = {Your Name},
+  year = {2024},
+  url = {https://github.com/yourusername/JMake.jl}
+}
+```
+
+## Support
+
+- **Issues**: [GitHub Issues](https://github.com/yourusername/JMake.jl/issues)
+- **Documentation**: [Online Docs](https://yourusername.github.io/JMake.jl)
+- **Discussions**: [GitHub Discussions](https://github.com/yourusername/JMake.jl/discussions)
 
 ---
 
-**JMake** - Making C++/Julia interop as simple as a TOML file ✨
+Made with ❤️ for the Julia community

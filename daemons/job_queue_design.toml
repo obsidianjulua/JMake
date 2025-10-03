@@ -1,0 +1,98 @@
+# JMake Job Queue - TOML-driven task system
+# ConfigurationManager reads this, dispatches jobs, tracks state
+
+[job_queue]
+enabled = true
+auto_execute = true  # Auto-run jobs when conditions met
+persistence = true   # Save queue state to disk
+
+# Job 1: Discover project structure
+[[jobs]]
+id = "discover_files"
+type = "discovery"
+daemon = "discovery"
+port = 3001
+priority = 10  # Higher = earlier
+status = "pending"  # pending, running, completed, failed
+depends_on = []
+target_section = "discovery.files"
+callback = "scan_files"
+args = { path = "{{project.root}}" }  # Template from config
+
+# Job 2: Find includes (depends on files)
+[[jobs]]
+id = "find_includes"
+type = "discovery"
+daemon = "discovery"
+port = 3001
+priority = 9
+status = "pending"
+depends_on = ["discover_files"]
+target_section = "discovery.include_dirs"
+callback = "build_include_dirs"
+args = { path = "{{project.root}}", files = "{{discovery.files}}" }
+
+# Job 3: Discover LLVM (independent, high priority)
+[[jobs]]
+id = "discover_llvm"
+type = "toolchain"
+daemon = "discovery"
+port = 3001
+priority = 10
+status = "pending"
+depends_on = []
+target_section = "llvm.tools"
+callback = "get_all_tools"
+args = {}
+
+# Job 4: Setup build structure
+[[jobs]]
+id = "setup_build"
+type = "setup"
+daemon = "setup"
+port = 3002
+priority = 8
+status = "pending"
+depends_on = []
+target_section = "compile.output_dir"
+callback = "create_structure"
+args = { path = "{{project.root}}", type = "cpp_project" }
+
+# Job 5: Compile sources (needs everything above)
+[[jobs]]
+id = "compile_ir"
+type = "compilation"
+daemon = "compilation"
+port = 3003
+priority = 5
+status = "pending"
+depends_on = ["discover_files", "find_includes", "discover_llvm", "setup_build"]
+target_section = "compile.ir_files"
+callback = "compile_parallel"
+args = { config = "{{config_path}}", force = false }
+
+# Job 6: Link and optimize
+[[jobs]]
+id = "link_optimize"
+type = "compilation"
+daemon = "compilation"
+port = 3003
+priority = 4
+status = "pending"
+depends_on = ["compile_ir"]
+target_section = "link.output"
+callback = "link_ir"
+args = { ir_files = "{{compile.ir_files}}", output = "{{link.output_dir}}/linked.ll" }
+
+# Job 7: Generate binary
+[[jobs]]
+id = "build_binary"
+type = "compilation"
+daemon = "compilation"
+port = 3003
+priority = 3
+status = "pending"
+depends_on = ["link_optimize"]
+target_section = "binary.library_path"
+callback = "compile_full_pipeline"
+args = { config = "{{config_path}}" }

@@ -1,0 +1,22 @@
+version = "0.1.0"
+
+[llvm]
+use_jmake_llvm = true
+
+[project]
+name = "test_project"
+root = "/home/grim/.julia/julia/JMake/daemons/test_project"
+
+[workflow]
+stages = ["discovery", "compile", "binary"]
+
+[discovery]
+enabled = true
+
+[compile]
+flags = ["-std=c++17", "-fPIC"]
+enabled = true
+
+[binary]
+library_name = "libtest_project.so"
+enabled = true

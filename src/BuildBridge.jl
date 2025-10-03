@@ -1,24 +1,28 @@
 #!/usr/bin/env julia
 # BuildBridge.jl - Simplified command execution for build systems
 # Focus: Tool discovery, simple execution, compiler error handling
+# Integrated with LLVMEnvironment for isolated toolchain execution
 
 module BuildBridge
 
 using Pkg
 
-# Load ErrorLearning module
+# Load required modules
 include("ErrorLearning.jl")
+include("LLVMEnvironment.jl")
 using .ErrorLearning
+using .LLVMEnvironment
+using SQLite
 
 # Global ErrorDB instance (lazy initialization)
-const GLOBAL_ERROR_DB = Ref{Union{ErrorDB,Nothing}}(nothing)
+const GLOBAL_ERROR_DB = Ref{Union{SQLite.DB,Nothing}}(nothing)
 
 """
 Get or initialize the global error database
 """
 function get_error_db(db_path::String="jmake_errors.db")
     if GLOBAL_ERROR_DB[] === nothing
-        GLOBAL_ERROR_DB[] = ErrorDB(db_path)
+        GLOBAL_ERROR_DB[] = ErrorLearning.init_db(db_path)
     end
     return GLOBAL_ERROR_DB[]
 end
@@ -29,8 +33,33 @@ end
 
 """
 Execute command and capture output (stdout + stderr combined)
+Uses LLVMEnvironment if the command is an LLVM tool
 """
-function run_command(cmd::Cmd; capture_output::Bool=true)
+function run_command(cmd::Cmd; capture_output::Bool=true, use_llvm_env::Bool=true)
+    # Wrapper function that executes with LLVM environment
+    execute_fn = if use_llvm_env
+        () -> _run_command_impl(cmd, capture_output)
+    else
+        () -> _run_command_impl(cmd, capture_output)
+    end
+
+    # Execute with LLVM environment if requested
+    if use_llvm_env
+        try
+            return LLVMEnvironment.with_llvm_env(execute_fn)
+        catch
+            # Fallback to direct execution if LLVM env fails
+            return _run_command_impl(cmd, capture_output)
+        end
+    else
+        return execute_fn()
+    end
+end
+
+"""
+Internal command execution implementation
+"""
+function _run_command_impl(cmd::Cmd, capture_output::Bool)
     try
         if capture_output
             io = IOBuffer()
@@ -57,10 +86,11 @@ end
 
 """
 Execute command from string and arguments
+Automatically uses LLVM environment for LLVM/Clang tools
 """
-function execute(command::String, args::Vector{String}=String[]; capture_output::Bool=true)
+function execute(command::String, args::Vector{String}=String[]; capture_output::Bool=true, use_llvm_env::Bool=true)
     cmd = `$command $args`
-    return run_command(cmd; capture_output=capture_output)
+    return run_command(cmd; capture_output=capture_output, use_llvm_env=use_llvm_env)
 end
 
 """
@@ -91,10 +121,28 @@ function command_exists(name::String)
 end
 
 """
-Discover LLVM/Clang toolchain
+Discover LLVM/Clang toolchain from LLVMEnvironment
 Returns Dict of tool_name => path
 """
 function discover_llvm_tools(required_tools::Vector{String}=["clang", "clang++", "llvm-config"])
+    tools = Dict{String,String}()
+
+    # Use LLVMEnvironment's toolchain
+    try
+        toolchain = LLVMEnvironment.get_toolchain()
+        for tool_name in required_tools
+            path = LLVMEnvironment.get_tool(tool_name)
+            if !isempty(path)
+                tools[tool_name] = path
+            end
+        end
+        return tools
+    catch
+        # Fallback to system discovery
+        @warn "LLVMEnvironment not available, falling back to system tools"
+    end
+
+    # Fallback: system discovery
     tools = Dict{String,String}()
 
     for tool in required_tools
@@ -184,89 +232,107 @@ Execute compiler command with intelligent error correction (uses ErrorLearning)
 """
 function compile_with_learning(command::String, args::Vector{String};
                                max_retries::Int=3,
-                               confidence_threshold::Float64=0.75,
+                               confidence_threshold::Float64=0.70,
                                db_path::String="jmake_errors.db",
                                project_path::String="",
                                config_modifier::Union{Function,Nothing}=nothing)
     db = get_error_db(db_path)
+    cmd_string = "$command $(join(args, " "))"
+    error_id = nothing
 
     for attempt in 1:max_retries
         output, exitcode = execute(command, args)
 
         if exitcode == 0
-            @info "Compilation successful" attempt=attempt
+            # Record successful fix if this was a retry
+            if !isnothing(error_id) && attempt > 1
+                ErrorLearning.record_fix(db, error_id,
+                    "Retry successful after $(attempt-1) attempts",
+                    "retry", "automatic", true)
+            end
             return (output, exitcode, attempt, String[])
         end
 
-        # Compilation failed - try to find a fix
-        @warn "Compilation failed (attempt $attempt/$max_retries)"
-        println("Error output:\n$output")
+        # Compilation failed - record error
+        (error_id, pattern_name, description) = ErrorLearning.record_error(
+            db, cmd_string, output, project_path=project_path)
 
-        # Find similar errors and suggest fixes
-        suggested_fixes = suggest_fix(db, output, confidence_threshold=confidence_threshold)
+        println("❌ Compilation Error (attempt $attempt/$max_retries)")
+        println("   Pattern: $pattern_name - $description")
+
+        # Get fix suggestions
+        suggested_fixes = ErrorLearning.suggest_fixes(db, output, project_path=project_path)
 
         if isempty(suggested_fixes)
-            @warn "No known fixes found for this error"
+            # Record that we found no fixes
+            ErrorLearning.record_fix(db, error_id, "No automatic fix available",
+                "none", "manual", false)
 
-            # Analyze with basic pattern matching as fallback
+            # Fallback to basic pattern matching
             basic_suggestions = analyze_compiler_error(output)
-
             return (output, exitcode, attempt, basic_suggestions)
         end
 
         # Try to apply the highest confidence fix
         best_fix = suggested_fixes[1]
-        @info "Found potential fix" confidence=best_fix.confidence fix=best_fix.fix_description
+        println("   💡 Suggested: $(best_fix["description"]) (confidence: $(round(best_fix["confidence"], digits=2)))")
 
-        if best_fix.confidence >= confidence_threshold && config_modifier !== nothing
-            @info "Applying automatic fix: $(best_fix.fix_action)"
+        if best_fix["confidence"] >= confidence_threshold && !isnothing(config_modifier)
+            println("   🔧 Attempting automatic fix...")
 
-            # Apply the fix (config_modifier is responsible for modifying the config)
             try
-                success = config_modifier(best_fix.fix_action)
+                success = config_modifier(best_fix)
+
+                # Record fix attempt
+                ErrorLearning.record_fix(db, error_id,
+                    best_fix["description"],
+                    best_fix["action"],
+                    best_fix["type"],
+                    success)
 
                 if success
-                    @info "Fix applied, retrying compilation..."
+                    println("   ✅ Fix applied, retrying...")
                     continue
                 else
-                    @warn "Failed to apply fix automatically"
+                    println("   ⚠️  Fix could not be applied automatically")
                 end
             catch e
-                @warn "Error applying fix" exception=e
+                println("   ❌ Error applying fix: $e")
+                ErrorLearning.record_fix(db, error_id, best_fix["description"],
+                    best_fix["action"], best_fix["type"], false)
             end
-        else
-            # Just suggest the fix to the user
-            suggestions = [
-                "Suggested fix (confidence: $(round(best_fix.confidence, digits=2))): $(best_fix.fix_description)",
-                "Action: $(best_fix.fix_action)"
-            ]
-
-            for (i, fix) in enumerate(suggested_fixes[2:min(3, length(suggested_fixes))])
-                push!(suggestions, "Alternative $i (confidence: $(round(fix.confidence, digits=2))): $(fix.fix_description)")
-            end
-
-            return (output, exitcode, attempt, suggestions)
         end
+
+        # Return suggestions to user
+        suggestions = [
+            "$(best_fix["description"]) (confidence: $(round(best_fix["confidence"], digits=2)))"
+        ]
+
+        for (i, fix) in enumerate(suggested_fixes[2:min(3, length(suggested_fixes))])
+            push!(suggestions, "Alternative $i: $(fix["description"]) ($(round(fix["confidence"], digits=2)))")
+        end
+
+        return (output, exitcode, attempt, suggestions)
     end
 
     # Max retries exceeded
-    output, exitcode = execute(command, args)
     return (output, exitcode, max_retries, ["Max retry attempts exceeded"])
 end
 
 """
-Record the outcome of a fix attempt
+Export error log to Obsidian-friendly markdown
 """
-function record_compilation_fix(error_output::String, fix_action::String, success::Bool;
-                                db_path::String="jmake_errors.db",
-                                fix_type::String="config_change",
-                                fix_description::String="",
-                                project_path::String="")
+function export_error_log(db_path::String="jmake_errors.db", output_path::String="error_log.md")
     db = get_error_db(db_path)
-    record_fix(db, error_output, fix_action, success,
-              fix_type=fix_type,
-              fix_description=fix_description,
-              project_path=project_path)
+    ErrorLearning.export_to_markdown(db, output_path)
+end
+
+"""
+Get error statistics
+"""
+function get_error_stats(db_path::String="jmake_errors.db")
+    db = get_error_db(db_path)
+    return ErrorLearning.get_error_stats(db)
 end
 
 # ============================================================================
@@ -343,15 +409,11 @@ export
     analyze_compiler_error,
     compile_with_analysis,
     compile_with_learning,
-    record_compilation_fix,
 
-    # Error learning
+    # Error learning & database
     get_error_db,
-    ErrorDB,
-    find_similar_error,
-    suggest_fix,
-    record_fix,
-    bootstrap_common_errors,
+    export_error_log,
+    get_error_stats,
 
     # Retry logic
     execute_with_retry,

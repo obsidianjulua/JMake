@@ -197,7 +197,7 @@ function save_wrapper_config(config::WrapperConfig, config_file::String)
             "hints" => config.type_hints
         ),
         "integration" => Dict(
-            "stage1_metadata" => config.stage1_metadata,
+            "stage1_metadata" => something(config.stage1_metadata, ""),
             "inherit_mappings" => config.inherit_mappings
         )
     )
@@ -646,7 +646,7 @@ end
 """
 Parse a single parameter
 """
-function parse_single_parameter(param::String)::Dict{String,String}
+function parse_single_parameter(param::Union{String,SubString{String}})::Dict{String,String}
     # Remove const, volatile, etc.
     param = replace(param, r"^(const|volatile|mutable)\s+" => "")
 

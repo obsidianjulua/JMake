@@ -80,7 +80,7 @@ opt_level = "O2"                # O0, O1, O2, O3, Os, Oz
 lto = false                     # Link-time optimization
 output_dir = "build/linked"
 
-# Custom optimization passes (advanced)
+# Custom optimization passes (advanced) Understand these before changing!!
 opt_passes = []  # e.g., ["inline", "mem2reg", "gvn"]
 
 # =============================================================================
@@ -157,7 +157,10 @@ test_command = "julia --project=. test/runtests.jl"
 [llvm]
 use_jmake_llvm = true           # Use JMake's bundled LLVM
 isolated = true                 # Isolate from system LLVM
-root = "/home/grim/.julia/julia/JMake/LLVM"  # Auto-detected if empty
+source = "auto"                 # "auto" (prefer JLL), "jll" (force LLVM_full_assert_jll), "intree" (force in-tree)
+root = ""                       # Auto-detected based on source if empty
+                                # For "jll": uses LLVM_full_assert_jll artifact directory
+                                # For "intree": uses /home/grim/.julia/julia/JMake/LLVM
 
 # Override tool paths (usually not needed)
 [llvm.tools]

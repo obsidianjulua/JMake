@@ -7,9 +7,24 @@ module LLVMEnvironment
 
 using Pkg
 
+# Conditional import - will try to use LLVM_full_assert_jll if available
+const LLVM_JLL_AVAILABLE = Ref{Bool}(false)
+
+function __init__()
+    try
+        @eval using LLVM_full_assert_jll
+        LLVM_JLL_AVAILABLE[] = true
+        @info "LLVM_full_assert_jll available - can use JLL toolchain"
+    catch
+        LLVM_JLL_AVAILABLE[] = false
+        @info "LLVM_full_assert_jll not available - using in-tree toolchain only"
+    end
+end
+
 """
 LLVM toolchain configuration and paths
-Represents the complete isolated LLVM ecosystem at /home/grim/.julia/julia/JMake/LLVM
+Represents the complete isolated LLVM ecosystem
+Can source from either in-tree LLVM or LLVM_full_assert_jll
 """
 struct LLVMToolchain
     # Root paths
@@ -42,6 +57,9 @@ struct LLVMToolchain
 
     # Isolated environment flag
     isolated::Bool
+
+    # Toolchain source: "intree" or "jll"
+    source::String
 end
 
 """
@@ -52,7 +70,7 @@ const GLOBAL_LLVM_TOOLCHAIN = Ref{Union{LLVMToolchain,Nothing}}(nothing)
 """
     get_jmake_llvm_root() -> String
 
-Get the absolute path to JMake's LLVM installation.
+Get the absolute path to JMake's in-tree LLVM installation.
 """
 function get_jmake_llvm_root()
     # __DIR__ points to /home/grim/.julia/julia/JMake/src
@@ -70,14 +88,78 @@ function get_jmake_llvm_root()
 end
 
 """
-    discover_llvm_tools(llvm_root::String) -> Dict{String,String}
+    get_jll_llvm_root() -> Union{String,Nothing}
+
+Get the absolute path to LLVM_full_assert_jll installation if available.
+Returns nothing if LLVM_full_assert_jll is not installed.
+"""
+function get_jll_llvm_root()
+    if !LLVM_JLL_AVAILABLE[]
+        return nothing
+    end
+
+    try
+        # Access the artifact directory from LLVM_full_assert_jll
+        jll_module = @eval LLVM_full_assert_jll
+        artifact_dir = jll_module.artifact_dir
+
+        if !isdir(artifact_dir)
+            @warn "LLVM_full_assert_jll artifact directory not found: $artifact_dir"
+            return nothing
+        end
+
+        return artifact_dir
+    catch e
+        @warn "Failed to get LLVM_full_assert_jll root: $e"
+        return nothing
+    end
+end
+
+"""
+    get_llvm_root(source::Symbol=:auto) -> Tuple{String, String}
+
+Get LLVM root path based on source preference.
+Returns (root_path, source_type) where source_type is "intree" or "jll"
+
+# Arguments
+- `source::Symbol`: :auto (prefer JLL), :intree (force in-tree), :jll (force JLL)
+"""
+function get_llvm_root(source::Symbol=:auto)
+    if source == :jll
+        jll_root = get_jll_llvm_root()
+        if jll_root === nothing
+            error("LLVM_full_assert_jll requested but not available")
+        end
+        return (jll_root, "jll")
+    elseif source == :intree
+        return (get_jmake_llvm_root(), "intree")
+    else  # :auto
+        # Prefer JLL if available
+        jll_root = get_jll_llvm_root()
+        if jll_root !== nothing
+            @info "Using LLVM_full_assert_jll toolchain"
+            return (jll_root, "jll")
+        else
+            @info "Using in-tree LLVM toolchain"
+            return (get_jmake_llvm_root(), "intree")
+        end
+    end
+end
+
+"""
+    discover_llvm_tools(llvm_root::String, source::String="intree") -> Dict{String,String}
 
 Discover all LLVM/Clang tools in the toolchain.
 Returns a dictionary mapping tool names to absolute paths.
+
+# Arguments
+- `llvm_root`: Root directory of LLVM installation
+- `source`: "intree" uses tools/, "jll" uses bin/
 """
-function discover_llvm_tools(llvm_root::String)
+function discover_llvm_tools(llvm_root::String, source::String="intree")
     tools = Dict{String,String}()
-    tools_dir = joinpath(llvm_root, "tools")
+    # JLL packages use standard bin/ directory, in-tree uses tools/
+    tools_dir = source == "jll" ? joinpath(llvm_root, "bin") : joinpath(llvm_root, "tools")
 
     if !isdir(tools_dir)
         @warn "LLVM tools directory not found: $tools_dir"
@@ -258,41 +340,46 @@ function build_environment_vars(llvm_root::String, bin_dir::String, lib_dir::Str
 end
 
 """
-    init_toolchain(;isolated::Bool=true, config=nothing) -> LLVMToolchain
+    init_toolchain(;isolated::Bool=true, config=nothing, source::Symbol=:auto) -> LLVMToolchain
 
 Initialize the LLVM toolchain.
 
 # Arguments
 - `isolated::Bool`: If true, uses JMake's local LLVM. If false, allows system LLVM fallback.
 - `config`: Optional JMakeConfig - reads paths from TOML if provided
+- `source::Symbol`: Toolchain source - :auto (prefer JLL), :intree (force in-tree), :jll (force JLL)
 
 # Returns
 - `LLVMToolchain`: Configured toolchain instance
 
 # Priority:
 1. If config provided and has llvm.root → use TOML paths
-2. If config empty → auto-discover and update TOML
+2. If config empty → auto-discover based on source preference
 3. Validate all tools exist, discover if missing
 """
-function init_toolchain(;isolated::Bool=true, config=nothing)
-    # Read from TOML first (source of truth)
-    llvm_root = if config !== nothing && haskey(config.llvm, "root") && !isempty(config.llvm["root"])
+function init_toolchain(; isolated::Bool=true, config=nothing, source::Symbol=:auto)
+    # Read from TOML first (source of truth), or discover based on source
+    (llvm_root, toolchain_source) = if config !== nothing && haskey(config.llvm, "root") && !isempty(config.llvm["root"])
         println("🔧 Initializing LLVM Toolchain from TOML")
-        config.llvm["root"]
+        # If TOML specifies a source, use it
+        src = get(config.llvm, "source", "intree")
+        (config.llvm["root"], src)
     else
         println("🔧 Initializing LLVM Toolchain (auto-discover)")
-        discovered_root = get_jmake_llvm_root()
+        (root, src) = get_llvm_root(source)
         # Update config if provided
         if config !== nothing
-            config.llvm["root"] = discovered_root
+            config.llvm["root"] = root
+            config.llvm["source"] = src
         end
-        discovered_root
+        (root, src)
     end
 
     println("   Root: $llvm_root")
+    println("   Source: $toolchain_source")
 
-    # Setup paths
-    bin_dir = joinpath(llvm_root, "tools")
+    # Setup paths (JLL uses bin/, in-tree uses tools/)
+    bin_dir = toolchain_source == "jll" ? joinpath(llvm_root, "bin") : joinpath(llvm_root, "tools")
     lib_dir = joinpath(llvm_root, "lib")
     include_dir = joinpath(llvm_root, "include")
     libexec_dir = joinpath(llvm_root, "libexec")
@@ -329,7 +416,7 @@ function init_toolchain(;isolated::Bool=true, config=nothing)
     else
         # Auto-discover and update TOML
         println("   Tools: Auto-discovering")
-        discovered = discover_llvm_tools(llvm_root)
+        discovered = discover_llvm_tools(llvm_root, toolchain_source)
         if config !== nothing
             config.llvm["tools"] = discovered
         end
@@ -371,7 +458,8 @@ function init_toolchain(;isolated::Bool=true, config=nothing)
         ldflags,
         libs,
         env_vars,
-        isolated
+        isolated,
+        toolchain_source
     )
 
     println("✅ LLVM Toolchain initialized")
@@ -544,6 +632,8 @@ function print_toolchain_info()
     println("LLVM Toolchain Information")
     println("="^70)
     println()
+    println("🎯 Source: $(toolchain.source)")
+    println()
     println("📁 Paths:")
     println("   Root:       $(toolchain.root)")
     println("   Bin:        $(toolchain.bin_dir)")
@@ -646,16 +736,19 @@ end
 
 # Module exports
 export LLVMToolchain,
-       get_toolchain,
-       init_toolchain,
-       with_llvm_env,
-       get_tool,
-       has_tool,
-       get_library,
-       get_include_flags,
-       get_link_flags,
-       run_tool,
-       print_toolchain_info,
-       verify_toolchain
+    get_toolchain,
+    init_toolchain,
+    with_llvm_env,
+    get_tool,
+    has_tool,
+    get_library,
+    get_include_flags,
+    get_link_flags,
+    run_tool,
+    print_toolchain_info,
+    verify_toolchain,
+    get_jll_llvm_root,
+    get_llvm_root,
+    LLVM_JLL_AVAILABLE
 
 end # module LLVMEnvironment

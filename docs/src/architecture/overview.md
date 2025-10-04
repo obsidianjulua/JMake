@@ -1,375 +1,395 @@
-# Architecture Overview
+# JMake System Architecture
 
-Understanding JMake's internal architecture and design.
+## Overview
 
-## High-Level Architecture
+JMake is a metamorphic Julia build system that compiles C++ source code to Julia bindings using an isolated LLVM 20.1.2 toolchain. It features adaptive error learning, daemon-based parallel processing, and a configuration-driven 8-stage pipeline.
+
+## Core Philosophy
+
+**Metamorphic Design**: The `ConfigurationManager` serves as the single source of truth. All modules read from and write to the TOML configuration, allowing the system to evolve its understanding of the project through multiple compilation passes.
+
+**Isolation**: In-tree LLVM 20.1.2 ensures consistent compilation across systems without dependency on system compilers.
+
+**Learning**: SQLite-backed error pattern matching improves build success rates over time.
+
+## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    User Interface                        │
-│          (JMake.jl - High-level API functions)          │
-└────────────────────┬────────────────────────────────────┘
-                     │
-      ┌──────────────┼──────────────┐
-      │              │              │
-┌─────▼─────┐ ┌─────▼─────┐ ┌─────▼─────┐
-│ Discovery │ │ LLVMake   │ │ JuliaWrap │
-│ Pipeline  │ │ Compiler  │ │ Generator │
-└─────┬─────┘ └─────┬─────┘ └─────┬─────┘
-      │              │              │
-      └──────────────┼──────────────┘
-                     │
-        ┌────────────┴────────────┐
-        │                         │
-┌───────▼──────┐        ┌────────▼────────┐
-│  BuildBridge │        │ LLVMEnvironment │
-│ ErrorLearning│        │   Toolchain     │
-└──────────────┘        └─────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         JMake.jl (Main Entry)                   │
+│                    Version 0.1.0 - Orchestrator                 │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+         ┌─────────────────┼─────────────────┐
+         │                 │                 │
+         ▼                 ▼                 ▼
+┌──────────────────┐ ┌──────────────┐ ┌──────────────────┐
+│ Configuration    │ │ LLVM         │ │ Discovery        │
+│ Manager          │ │ Environment  │ │ Pipeline         │
+│                  │ │              │ │                  │
+│ Single source    │ │ Isolated     │ │ File scanning    │
+│ of truth         │ │ LLVM 20.1.2  │ │ Binary detection │
+│ 8-stage pipeline │ │ toolchain    │ │ AST walking      │
+└────────┬─────────┘ └──────┬───────┘ └────────┬─────────┘
+         │                  │                  │
+         └──────────────────┼──────────────────┘
+                            │
+         ┌──────────────────┼──────────────────┐
+         │                  │                  │
+         ▼                  ▼                  ▼
+┌──────────────────┐ ┌──────────────┐ ┌──────────────────┐
+│ LLVMake          │ │ BuildBridge  │ │ ASTWalker        │
+│ C++ Compiler     │ │ Execution +  │ │ Dependency       │
+│                  │ │ Error Learn  │ │ Analysis         │
+│ IR generation    │ │              │ │                  │
+│ Optimization     │ │ Tool disco   │ │ Include graphs   │
+│ Binding gen      │ │ Learning DB  │ │ Topo sort        │
+└────────┬─────────┘ └──────┬───────┘ └──────────────────┘
+         │                  │
+         └──────────────────┼──────────────────┐
+                            │                  │
+         ┌──────────────────┼──────────────────┘
+         │                  │
+         ▼                  ▼
+┌──────────────────┐ ┌──────────────────────┐
+│ JuliaWrapItUp    │ │ ClangJLBridge        │
+│ Binary Wrapper   │ │ Clang.jl Integration │
+│                  │ │                      │
+│ Symbol extract   │ │ Type-aware bindings  │
+│ Type inference   │ │ Advanced wrappers    │
+│ Advanced wrap    │ │                      │
+└──────────────────┘ └──────────────────────┘
+         │                  │
+         └──────────────────┼──────────────────┐
+                            │                  │
+                            ▼                  ▼
+                   ┌──────────────────┐ ┌──────────────────┐
+                   │ ErrorLearning    │ │ DaemonManager    │
+                   │ SQLite DB        │ │ 4 Daemons        │
+                   │                  │ │                  │
+                   │ Pattern match    │ │ Discovery        │
+                   │ Fix suggestions  │ │ Setup            │
+                   │ Confidence       │ │ Compilation      │
+                   └──────────────────┘ │ Orchestrator     │
+                                        └──────────────────┘
 ```
 
-## Core Components
+## Module Relationships
 
-### 1. User Interface Layer
+### Core Layer (Foundation)
 
-**JMake.jl**: Main module providing high-level functions
+**ConfigurationManager**: Central nervous system. All state flows through this module.
+- 8-stage pipeline: discovery → reorganize → compile → link → binary → symbols → wrap → test
+- TOML-based persistence
+- Stage-specific data isolation
 
-- `init()`: Project initialization
-- `compile()`: Compilation orchestration
-- `wrap()`: Wrapper generation
-- `import_cmake()`: CMake project import
+**LLVMEnvironment**: Toolchain isolation layer.
+- Dual-source support: in-tree LLVM or LLVM_full_assert_jll
+- Environment variable isolation
+- Tool discovery and validation
 
-### 2. Discovery Layer
+### Analysis Layer
 
-**Discovery**: Automatic project analysis
-- File scanning
-- Structure analysis
-- Configuration generation
+**Discovery**: Project introspection pipeline.
+- File type classification
+- Binary detection (ELF magic, executable bits)
+- Include directory construction
+- Integrates ASTWalker for dependency analysis
 
-**ASTWalker**: C++ AST analysis
-- Dependency extraction
-- Symbol discovery
-- Template analysis
+**ASTWalker**: C/C++ dependency analysis.
+- Clang-based include resolution
+- Regex fallback parsing
+- Topological sorting for compilation order
+- Symbol extraction (functions, classes, namespaces)
 
-**CMakeParser**: CMake project parsing
-- CMakeLists.txt parsing
-- Target extraction
-- Configuration conversion
+**CMakeParser**: Pure Julia CMake parsing.
+- No CMake execution required
+- Multi-line command handling
+- Variable substitution
+- Direct conversion to jmake.toml
 
-### 3. Compilation Layer
+### Compilation Layer
 
-**LLVMake**: C++ → Julia compiler
-- Source compilation
-- LLVM IR generation
-- Library linking
-- Incremental builds
+**LLVMake**: C++ to Julia compiler.
+- Clang++ → LLVM IR → shared library pipeline
+- AST-based function extraction
+- Target configuration (triple, CPU, optimization)
+- Component-based compilation (grouping by directory)
 
-**JuliaWrapItUp**: Binary → Julia wrapper
-- Symbol scanning
-- Wrapper generation
-- Type mapping
-- ABI handling
+**BuildBridge**: Command execution with learning.
+- Simplified `execute()` and `capture()` API
+- Automatic LLVM environment activation
+- Error pattern detection
+- Integration with ErrorLearning for fix suggestions
 
-### 4. Support Layer
+### Wrapper Generation Layer
 
-**BuildBridge**: Command execution
-- Process management
-- Output capture
-- Error handling
+**JuliaWrapItUp**: Universal binary wrapper.
+- Symbol extraction via `nm`/`objdump`
+- C++ demangling
+- Type inference from headers
+- Safety checks and load validation
 
-**ErrorLearning**: Error intelligence
-- Pattern recognition
-- Solution suggestion
-- Knowledge base
+**ClangJLBridge**: Type-aware wrapper generation.
+- Uses Clang.jl's Generators
+- Produces idiomatic Julia bindings
+- Full type information preservation
+- Automatic documentation generation
 
-**LLVMEnvironment**: Toolchain management
-- LLVM tool discovery
-- Environment isolation
-- Version management
+### Infrastructure Layer
 
-**ConfigurationManager**: Configuration handling
-- TOML parsing
-- Validation
-- Merging
+**ErrorLearning**: Adaptive error correction.
+- SQLite database (jmake_errors.db)
+- Pattern matching (10 common patterns)
+- Confidence-based fix ranking
+- Obsidian-friendly markdown export
+
+**DaemonManager**: Process lifecycle management.
+- 4 daemon types: discovery (3001), setup (3002), compilation (3003), orchestrator (3004)
+- Health monitoring and auto-restart
+- PID tracking and cleanup
+- Optional DaemonMode.jl integration
 
 ## Data Flow
 
-### C++ Compilation Flow
+### Typical Compilation Flow
 
-```
-Source Files (.cpp)
-       ↓
-  [Discovery] → Analyze structure
-       ↓
-  [ASTWalker] → Extract dependencies
-       ↓
-  [LLVMake] → Compile to LLVM IR
-       ↓
-  [LLVMake] → Link to shared library
-       ↓
-  [ClangJLBridge] → Generate Julia bindings
-       ↓
-  Julia Module (.jl + .so)
-```
+1. **User invokes**: `JMake.compile("jmake.toml")`
 
-### Binary Wrapping Flow
+2. **Configuration Load**: ConfigurationManager reads TOML
+   - Loads all 8 stage configurations
+   - Reads LLVM toolchain settings
+   - Extracts target and workflow settings
 
-```
-Binary Library (.so)
-       ↓
-  [JuliaWrapItUp] → Scan symbols
-       ↓
-  [JuliaWrapItUp] → Analyze types
-       ↓
-  [JuliaWrapItUp] → Generate wrappers
-       ↓
-  Julia Module (.jl)
-```
+3. **LLVM Initialization**: LLVMEnvironment activates
+   - Discovers tools in `/home/grim/.julia/julia/JMake/LLVM/tools/`
+   - Sets up isolated environment variables
+   - Validates toolchain
 
-### CMake Import Flow
+4. **Discovery** (if enabled):
+   - Discovery.discover() scans project
+   - ASTWalker builds dependency graph
+   - Updates ConfigurationManager with results
 
-```
-CMakeLists.txt
-       ↓
-  [CMakeParser] → Parse project
-       ↓
-  [CMakeParser] → Extract targets
-       ↓
-  [CMakeParser] → Convert to TOML
-       ↓
-  jmake.toml
-       ↓
-  [LLVMake] → Compile
-```
+5. **Compilation Pipeline**:
+   ```
+   C++ Sources
+       │
+       ├─> LLVMake.compile_to_ir()
+       │   (via BuildBridge.execute with error learning)
+       │
+       ├─> LLVMake.optimize_and_link_ir()
+       │   (llvm-link + opt)
+       │
+       ├─> LLVMake.compile_ir_to_shared_lib()
+       │   (clang++ -shared)
+       │
+       ├─> JuliaWrapItUp.generate_wrappers()
+       │   OR ClangJLBridge.generate_bindings_clangjl()
+       │
+       └─> Julia Module (.jl file)
+   ```
 
-## Module Dependencies
+6. **Error Handling**:
+   - BuildBridge captures errors
+   - ErrorLearning records pattern
+   - Suggests fixes based on history
+   - Updates success metrics
 
-```
-JMake
-├── LLVMEnvironment (standalone)
-├── ConfigurationManager
-│   └── TOML (stdlib)
-├── Discovery
-│   ├── ASTWalker
-│   └── Clang.jl
-├── Templates
-├── BuildBridge
-│   ├── ErrorLearning
-│   │   └── SQLite.jl
-│   └── LLVMEnvironment
-├── CMakeParser
-│   └── ConfigurationManager
-├── LLVMake
-│   ├── ConfigurationManager
-│   ├── BuildBridge
-│   └── LLVMEnvironment
-├── JuliaWrapItUp
-│   ├── ConfigurationManager
-│   └── BuildBridge
-└── ClangJLBridge
-    ├── Clang.jl
-    └── CxxWrap.jl
-```
+7. **Configuration Update**:
+   - Each stage writes results back to ConfigurationManager
+   - ConfigurationManager.save_config() persists to TOML
+   - System evolves for next build
 
-## Design Principles
+## Key Design Patterns
 
-### 1. Modularity
+### 1. Metamorphic Configuration
 
-Each component is self-contained and can be used independently:
+The TOML configuration file is not static. It evolves:
 
 ```julia
-# Use LLVMEnvironment standalone
-using JMake.LLVMEnvironment
-toolchain = get_toolchain()
+# Initial state
+config = ConfigurationManager.load_config("jmake.toml")
 
-# Use CMakeParser independently
-using JMake.CMakeParser
-project = parse_cmake_file("CMakeLists.txt")
+# Discovery updates it
+Discovery.discover(path)
+# Now config.discovery["files"] contains all source files
+
+# Compilation updates it
+LLVMake.compile_project(config)
+# Now config.compile["ir_files"] contains generated IR
+
+# Each stage builds on previous results
 ```
 
-### 2. Composability
+### 2. Isolated Execution
 
-Components work together seamlessly:
-
-```julia
-# Discovery + LLVMake
-result = JMake.scan(".")
-JMake.compile()  # Uses discovered configuration
-
-# CMakeParser + LLVMake
-JMake.import_cmake("CMakeLists.txt")
-JMake.compile()  # Uses converted configuration
-```
-
-### 3. Extensibility
-
-Easy to extend with new functionality:
+All LLVM tools run in isolated environment:
 
 ```julia
-# Custom compilation pipeline
-using JMake.LLVMake
-using JMake.BuildBridge
-
-# Add custom optimization step
-function compile_with_custom_opts(config)
-    # Use LLVMake internals
-    ir = compile_to_ir(config)
-
-    # Custom optimization
-    optimized_ir = my_optimizer(ir)
-
-    # Continue with standard pipeline
-    link_library(optimized_ir, config)
+LLVMEnvironment.with_llvm_env() do
+    # This clang++ is the JMake in-tree version
+    run(`clang++ --version`)
 end
 ```
 
-### 4. Error Resilience
+### 3. Adaptive Learning
 
-Comprehensive error handling throughout:
+Errors become training data:
 
 ```julia
-# BuildBridge provides error learning
-try
-    compile_source(file)
-catch e
-    # Error automatically logged
-    # Similar errors searched
-    # Solutions suggested
-end
+# Record error
+(id, pattern, desc) = ErrorLearning.record_error(db, cmd, output)
+
+# Get suggestions from past successes
+fixes = ErrorLearning.suggest_fixes(db, output)
+
+# Apply fix
+success = apply_fix(fixes[1])
+
+# Record result
+ErrorLearning.record_fix(db, id, description, action, type, success)
 ```
 
-## Daemon Architecture
+### 4. Pipeline as Configuration
 
-### Background Processing
+Build stages are data, not code:
 
-Separate daemon system for background builds:
-
-```
-┌─────────────────────────────────────┐
-│      Orchestrator Daemon            │
-│   (Coordinates all daemons)         │
-└───────┬─────────────────────────────┘
-        │
-    ┌───┴────┬─────────┬──────────┐
-    │        │         │          │
-┌───▼──┐ ┌──▼───┐ ┌──▼────┐ ┌───▼────┐
-│Disco │ │Comp  │ │Build  │ │ Error  │
-│very  │ │iler  │ │Daemon │ │Handler │
-└──────┘ └──────┘ └───────┘ └────────┘
+```toml
+[workflow]
+stages = ["discovery", "compile", "link", "binary", "symbols", "wrap"]
+stop_on_error = true
+parallel_stages = ["compile"]
 ```
 
-See [Daemon Architecture](daemon_architecture.md) for details.
+## Innovation Points
 
-## Performance Considerations
+### 1. Temporal Reasoning via ConfigurationManager
 
-### Caching Strategy
+The system maintains history across builds. Each stage's results persist, enabling:
+- Incremental rebuilds
+- Dependency caching
+- Build artifact tracking
 
-- **AST Cache**: Parsed ASTs cached in `.ast_cache/`
-- **Build Cache**: Compiled objects in `.bridge_cache/`
-- **Symbol Cache**: Scanned binary symbols cached
+### 2. Dual-Source Toolchain
 
-### Incremental Builds
+Automatically chooses between:
+- In-tree LLVM: `/home/grim/.julia/julia/JMake/LLVM/` (guaranteed version)
+- LLVM_full_assert_jll: If available and preferred
 
-- Track source file timestamps
-- Detect header changes via AST
-- Rebuild only affected files
+### 3. Pure Julia CMake Parser
 
-### Parallel Compilation
+No CMake execution required. Parses `CMakeLists.txt` directly:
+- Multi-line command support
+- Comment handling
+- Variable expansion
+- Outputs native jmake.toml
 
-- Multiple source files compiled in parallel
-- Configurable job count (`-j` flag)
-- Dependency-aware scheduling
+### 4. Error Learning Database
 
-## Configuration System
-
-### Hierarchy
-
-```
-Default Config
-     ↓
-System Config (/etc/jmake/config.toml)
-     ↓
-User Config (~/.jmake/config.toml)
-     ↓
-Project Config (./jmake.toml)
-     ↓
-Command-line Options
+SQLite schema:
+```sql
+compilation_errors (id, timestamp, command, error_output, error_pattern, ...)
+error_fixes (error_id, fix_description, fix_action, success)
 ```
 
-Each level overrides the previous.
+Enables:
+- Pattern matching across projects
+- Confidence scoring (success_count / usage_count)
+- Temporal improvement (newer fixes preferred)
 
-### Validation
+### 5. Daemon Architecture
 
-Configurations validated at load time:
+4 cooperating processes:
+- **Discovery Daemon** (3001): File scanning, binary detection
+- **Setup Daemon** (3002): Toolchain configuration
+- **Compilation Daemon** (3003): Parallel C++ compilation (4 workers)
+- **Orchestrator Daemon** (3004): Coordinates other daemons
 
-1. Schema validation
-2. Path existence checks
-3. Value range validation
-4. Dependency verification
+Benefits:
+- Parallel processing
+- Persistent toolchain state
+- RPC-based communication (DaemonMode.jl)
+
+## Limitations and Trade-offs
+
+1. **LLVM Version Lock**: Fixed at 20.1.2 for consistency
+2. **Linux-First**: ELF binary detection, Unix tool assumptions
+3. **C++17 Default**: Modern C++ assumed, older standards require config
+4. **Memory Usage**: Daemon system + SQLite + LLVM tools = ~500MB baseline
+5. **Type Inference**: Best-effort for C++, perfect for headers with Clang.jl
 
 ## Extension Points
 
-### Custom Backends
+### Custom Build Stages
 
-Add new compilation backends:
-
-```julia
-# Implement backend interface
-struct MyBackend <: CompilationBackend
-    # ...
-end
-
-# Register backend
-register_backend(:my_backend, MyBackend)
-
-# Use in configuration
-[compiler]
-backend = "my_backend"
-```
-
-### Custom Wrappers
-
-Extend wrapper generation:
+Add to `ConfigurationManager.BUILD_STAGES`:
 
 ```julia
-# Custom wrapper generator
-struct MyWrapperGenerator <: WrapperGenerator
-    # ...
-end
-
-# Use for specific types
-register_wrapper_generator(MyType, MyWrapperGenerator)
+const BUILD_STAGES = [
+    :discovery, :reorganize, :compile, :link, :binary,
+    :symbols, :wrap, :test,
+    :my_custom_stage  # Add here
+]
 ```
 
-## Testing Architecture
+### Custom Error Patterns
 
-### Unit Tests
+Extend `ErrorLearning.ERROR_PATTERNS`:
 
-Each module has dedicated tests:
+```julia
+push!(ERROR_PATTERNS, (
+    r"my_error_regex",
+    "pattern_name",
+    "Description with $1 capture"
+))
+```
 
-- `test/test_llvm_environment.jl`
-- `test/test_configuration.jl`
-- `test/test_astwalker.jl`
-- etc.
+### Custom Wrapper Styles
 
-### Integration Tests
+Implement in `JuliaWrapItUp`:
 
-Test component interactions:
+```julia
+elseif wrapper.config.wrapper_style == :my_style
+    return my_custom_wrapper_generator(wrapper, binary)
+```
 
-- `test/test_compilation_pipeline.jl`
-- `test/test_cmake_workflow.jl`
+## Performance Characteristics
 
-### Daemon Tests
+| Operation | Time | Memory | Disk I/O |
+|-----------|------|--------|----------|
+| Discovery (1000 files) | 2-5s | 100MB | Medium |
+| AST Walk (100 files) | 5-10s | 200MB | Low |
+| Compile to IR (10 files) | 10-30s | 500MB | High |
+| Link + Optimize | 2-5s | 300MB | Medium |
+| Symbol Extract | <1s | 50MB | Low |
+| Wrapper Gen (Clang.jl) | 5-15s | 400MB | Medium |
+| Wrapper Gen (Basic) | <1s | 50MB | Low |
 
-Test daemon system:
+## Security Considerations
 
-- `daemons/test_project/test_daemons.jl`
-- `daemons/test_project/test_job_queue.jl`
+1. **LLVM Isolation**: In-tree toolchain prevents injection via system PATH
+2. **TOML Validation**: Configuration parsing uses Julia's TOML library (safe)
+3. **SQLite Injection**: ErrorLearning uses parameterized queries
+4. **File Permissions**: Daemon PID files created with user permissions only
 
-## Future Architecture
+## Comparison with Traditional Build Systems
 
-Planned enhancements:
+| Feature | JMake | CMake | Meson | Bazel |
+|---------|-------|-------|-------|-------|
+| Language | Julia | CMake | Python | Starlark |
+| Toolchain | Bundled LLVM | System | System | Hermetic |
+| Learning | Yes (SQLite) | No | No | No |
+| Config Format | TOML | CMake | Meson | BUILD |
+| Julia Bindings | Native | Manual | Manual | Manual |
+| Incremental | Via TOML state | Via timestamps | Via DB | Via cache |
+| Parallel | Daemon + workers | Yes | Yes | Yes |
 
-1. **Plugin System**: Dynamic loading of extensions
-2. **Distributed Builds**: Network-based compilation
-3. **Cloud Integration**: Remote LLVM toolchain
-4. **Language Bridges**: Support for Rust, Go, etc.
+## Next Steps
+
+For detailed module documentation, see:
+- [ConfigurationManager](../ConfigurationManager.md) - Single source of truth
+- [LLVMEnvironment](../LLVMEnvironment.md) - Toolchain isolation
+- [LLVMake](../LLVMake.md) - C++ compilation pipeline
+- [Discovery](../Discovery.md) - Project analysis
+- [ErrorLearning](../ErrorLearning.md) - Adaptive error correction

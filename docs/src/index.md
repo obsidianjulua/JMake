@@ -1,136 +1,146 @@
-# JMake.jl
+# JMake Documentation
 
-*Automated C++ to Julia compilation system with full discovery, configuration, and build pipeline*
+Welcome to the documentation for JMake.jl!
 
-## Overview
+JMake is a powerful, TOML-based build system for Julia projects that seamlessly integrates with LLVM and Clang. It's designed to simplify the process of generating Julia bindings from C++ source code and wrapping existing binary libraries, offering a robust solution for complex interlanguage interoperability.
 
-JMake is a **complete automated build system** that takes C++ projects and produces Julia-callable shared libraries. Point it at any C++ codebase, and JMake automatically:
+## Strong Points & Key Features
 
-1. **Discovers** all source files, headers, and dependencies
-2. **Analyzes** AST relationships using Clang
-3. **Configures** complete build settings (jmake.toml)
-4. **Compiles** C++ → LLVM IR → optimized shared library
-5. **Extracts** all exported symbols
-6. **Generates** Julia bindings (optional)
+*   **Deep LLVM/Clang Integration:** JMake leverages the full power of LLVM and Clang for advanced C++ compilation, analysis, and Julia bindings generation. This allows for fine-grained control over the build process and efficient code generation.
+*   **Intelligent Error Learning System:** With its integrated `ErrorLearning` module, JMake can analyze compiler errors, learn from them, and even suggest fixes, significantly streamlining the debugging process for C++ projects.
+*   **Persistent Daemons & Job Queue System:** JMake employs a system of persistent daemons (`DaemonManager`) to handle background tasks such such as compilation, dependency discovery, and other build-related operations. This ensures efficient resource utilization and a responsive development experience.
+*   **CMake Project Integration:** Easily import existing CMake projects using the `CMakeParser` module, allowing JMake to understand and build complex C++ projects without requiring a full CMake build system.
+*   **Flexible TOML-based Configuration:** All aspects of your build, from compiler flags to binding generation rules, are configured using simple and human-readable TOML files (`ConfigurationManager`), making project setup and maintenance straightforward.
+*   **Advanced AST Analysis:** The `ASTWalker` module performs in-depth Abstract Syntax Tree (AST) analysis to understand code dependencies, which is crucial for efficient incremental builds and accurate binding generation.
 
-**One command. Complete automation.**
+## Getting Started: Easy API Calls
 
-## Key Features
+JMake provides a set of high-level functions for common tasks:
 
-### 🎯 Core Functionality (Production Ready)
+*   **`JMake.init(project_dir::String="."; type::Symbol=:cpp)`**
+    Initialize a new JMake project with the appropriate directory structure.
+    ```julia
+    JMake.init("myproject")  # Initialize a C++ project
+    JMake.init("mybindings", type=:binary)  # Initialize a binary wrapping project
+    ```
 
-- **✅ Automatic Discovery**: Scans projects, finds all C++/C files, headers, binaries
-- **✅ LLVM Toolchain**: Embedded LLVM 20.1.2 with 52+ tools (clang, opt, llvm-link)
-- **✅ AST Analysis**: Full dependency graph with 100+ files analyzed
-- **✅ Auto-Configuration**: Generates complete jmake.toml with all settings
-- **✅ Full Pipeline**: C++ → IR → Link → Optimize → Shared Library
-- **✅ Symbol Extraction**: All extern "C" functions exported and verified
-- **✅ Incremental Builds**: 16-200x faster rebuilds with smart caching
-- **✅ Error Learning**: SQLite database tracks and learns from compilation errors
+*   **`JMake.compile(config_file::String="jmake.toml")`**
+    Compile a C++ project to Julia bindings using the JMake system.
+    ```julia
+    JMake.compile()  # Use default jmake.toml
+    JMake.compile("custom_config.toml")
+    ```
 
-### ⚡ Performance (Tested)
+*   **`JMake.wrap(config_file::String="wrapper_config.toml")`**
+    Generate Julia wrappers for existing binary files based on a configuration.
+    ```julia
+    JMake.wrap()  # Use default wrapper_config.toml
+    JMake.wrap("custom_wrapper.toml")
+    ```
 
-| Build Type | Time | vs Traditional |
-|------------|------|----------------|
-| First Build | 5-10s | Baseline |
-| Incremental | 0.3-2s | **16-50x faster** ⚡ |
-| No Changes | 0.1s | **200x faster** ⚡ |
+*   **`JMake.wrap_binary(binary_path::String; config_file::String="wrapper_config.toml")`**
+    Wrap a specific binary file to Julia bindings.
+    ```julia
+    JMake.wrap_binary("/usr/lib/libmath.so")
+    JMake.wrap_binary("./build/libmylib.so")
+    ```
 
-### 🏗️ Advanced Features
+*   **`JMake.info()` and `JMake.help()`**
+    Display general information about JMake or a command reference.
+    ```julia
+    JMake.info()
+    JMake.help()
+    ```
 
-- **📦 CMake Integration**: Import CMakeLists.txt without running CMake
-- **🔧 Binary Wrapping**: Wrap existing .so/.dll libraries
-- **⚡ Daemon System**: Background build servers for continuous compilation
-- **🔄 Job Queue**: TOML-driven task system with dependencies
-- **📊 Watch Mode**: Auto-rebuild on file changes
+## Advanced Usage: Diving into the API
 
-## Quick Start
+For more fine-grained control and advanced scenarios, you can interact with JMake's submodules and their specific functions.
 
-### Option 1: Automatic (Recommended)
+### `JMake.JuliaWrapItUp` - Advanced Binary Wrapping
 
-```julia
-using JMake
+The `JuliaWrapItUp` submodule is at the core of JMake's binary wrapping capabilities. It provides tools to analyze binaries, extract symbols, and generate robust Julia wrappers.
 
-# Point JMake at any C++ project
-# It handles EVERYTHING automatically
-JMake.compile("/path/to/cpp/project")
+*   **`JMake.JuliaWrapItUp.generate_wrappers(wrapper::BinaryWrapper)`**
+    Generate Julia wrappers for all binaries defined in a `BinaryWrapper` configuration.
+*   **`JMake.JuliaWrapItUp.scan_binaries(wrapper::BinaryWrapper)`**
+    Scan the configured binary paths to discover available binaries and their properties.
 
-# Use the compiled library
-lib = "julia/libmyproject.so"
-result = ccall((:my_function, lib), Int32, (Int32,), 42)
-```
+### `JMake.LLVMake` - C++ Compilation and Julia Binding Generation
 
-### Option 2: New Project
+The `LLVMake` submodule handles the intricate process of compiling C++ code and generating Julia bindings using LLVM.
 
-```julia
-using JMake
+*   **`JMake.LLVMake.compile_project(config::CompilerConfig)`**
+    Compiles the C++ project defined by the `CompilerConfig` and generates Julia bindings.
 
-# Create project structure
-JMake.init("mymath")
-cd("mymath")
+### Daemon Management
 
-# Add C++ code to src/
-# JMake auto-discovers and compiles
-JMake.compile()
-```
+JMake's daemon system allows for background processing. You can control these daemons directly:
 
-## What JMake Does Automatically
+*   **`JMake.start_daemons(;project_root=pwd())`**
+    Start all JMake daemon servers (discovery, setup, compilation, orchestrator).
+    ```julia
+    JMake.start_daemons()
+    ```
+*   **`JMake.stop_daemons()`**
+    Stop all running JMake daemons gracefully.
+    ```julia
+    JMake.stop_daemons()
+    ```
+*   **`JMake.daemon_status()`**
+    Display the current status of all JMake daemons.
+    ```julia
+    JMake.daemon_status()
+    ```
+*   **`JMake.ensure_daemons()`**
+    Check if all daemons are running and restart any that have crashed.
+    ```julia
+    if !JMake.ensure_daemons()
+        println("Some daemons failed to restart")
+    end
+    ```
 
-```
-Input: /path/to/cpp/project/
-       ├── src/*.cpp
-       └── include/*.h
+### `JMake.import_cmake` - Integrating CMake Projects
 
-JMake runs:
-  1. Discovery  → Finds 23 C++ files, 15 headers
-  2. AST Walk   → Analyzes 104 dependencies
-  3. LLVM Find  → Discovers 52 tools
-  4. Config Gen → Creates jmake.toml
-  5. Compile    → C++ → LLVM IR (parallel)
-  6. Link       → Merges IR files
-  7. Optimize   → Applies -O2/-O3
-  8. Library    → Creates libproject.so
-  9. Symbols    → Extracts 47 functions
+*   **`JMake.import_cmake(cmake_file::String="CMakeLists.txt"; target::String="", output::String="jmake.toml")`**
+    Import a CMake project and generate a `jmake.toml` configuration file from it.
+    ```julia
+    JMake.import_cmake("path/to/CMakeLists.txt")
+    JMake.import_cmake("opencv/CMakeLists.txt", target="opencv_core")
+    ```
 
-Output: julia/libproject.so (ready to use!)
-        build/*.ll (LLVM IR files)
-        jmake.toml (complete config)
-```
+### Project Discovery and Analysis
 
-## Components
+*   **`JMake.scan(path="."; generate_config=true, output="jmake.toml")`**
+    Scan a directory, analyze its structure, and optionally generate a `jmake.toml` configuration.
+    ```julia
+    JMake.scan()  # Scan current directory
+    JMake.scan("path/to/project", generate_config=false)
+    ```
+*   **`JMake.analyze(path=".")`**
+    Analyze project structure and return detailed analysis results.
+    ```julia
+    result = JMake.analyze("path/to/project")
+    println("Found \$(length(result[:scan_results].cpp_sources)) C++ files")
+    ```
 
-### Core Modules
+### Error Learning Database Export
 
-- **LLVMEnvironment**: Isolated LLVM toolchain management
-- **ConfigurationManager**: TOML-based project configuration
-- **Discovery**: Automatic project structure analysis
-- **ASTWalker**: C++ AST dependency analysis
-- **CMakeParser**: CMake project parsing and conversion
+*   **`JMake.export_errors(output_path::String="error_log.md")`**
+    Export the error learning database to an Obsidian-friendly Markdown format.
+    ```julia
+    JMake.export_errors("docs/errors.md")
+    ```
 
-### Build Pipeline
+## Further Exploration
 
-- **LLVMake**: C++ source → Julia compiler
-- **JuliaWrapItUp**: Binary → Julia wrapper generator
-- **BuildBridge**: Command execution with error learning
-- **ClangJLBridge**: Clang.jl integration for binding generation
+JMake is composed of several powerful submodules. For deeper customization and understanding, you can explore their individual functionalities:
 
-### Advanced Features
+*   `JMake.LLVMEnvironment`: Manage LLVM toolchains.
+*   `JMake.ConfigurationManager`: Programmatic access to JMake configurations.
+*   `JMake.ASTWalker`: Detailed C++ AST analysis.
+*   `JMake.Discovery`: Project structure discovery.
+*   `JMake.ErrorLearning`: Advanced error analysis and suggestion.
+*   `JMake.BuildBridge`: Low-level build operations and command execution.
+*   `JMake.ClangJLBridge`: Direct interaction with Clang.
 
-- **Daemon System**: Background compilation with job queue
-- **Error Learning**: Automated error pattern recognition
-- **Sysimage Support**: Custom Julia sysimages for faster startup
-
-## Documentation Structure
-
-```@contents
-Pages = [
-    "guides/installation.md",
-    "guides/quickstart.md",
-    "api/jmake.md",
-]
-Depth = 2
-```
-
-## Package Version
-
-Current version: `v0.1.0` (defined as `JMake.VERSION`)
+This documentation provides a starting point. As you add more content to your `docs/src` directory, you can expand on these sections and create dedicated pages for each submodule and its functions.

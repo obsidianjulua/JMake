@@ -1,77 +1,30 @@
 using Documenter
-
-# Push JMake modules to LOAD_PATH
-push!(LOAD_PATH, joinpath(@__DIR__, "..", "src"))
-
-# Import modules for API documentation
-using JMake
-
-# Get all submodules that are actually exported
-# Since JMake re-exports the modules, we can access them directly
-modules_list = Module[JMake]
-
-# Add submodules if they're available
-for mod_name in [:LLVMEnvironment, :ConfigurationManager, :ASTWalker,
-                  :Discovery, :ErrorLearning, :BuildBridge,
-                  :CMakeParser, :LLVMake, :JuliaWrapItUp,
-                  :ClangJLBridge, :DaemonManager]
-    if isdefined(JMake, mod_name)
-        push!(modules_list, getfield(JMake, mod_name))
-    end
-end
+using JMake # Assuming your main module is JMake
 
 makedocs(
-    sitename = "JMake.jl",
-    format = Documenter.HTML(
-        prettyurls = get(ENV, "CI", nothing) == "true",
-        canonical = "https://github.com/yourusername/JMake.jl",
-        collapselevel = 1,
-    ),
-    modules = modules_list,
+    sitename = "JMake Documentation",
+    format = Documenter.HTML(),
+    modules = [JMake],
     pages = [
         "Home" => "index.md",
-        "Getting Started" => [
-            "guides/installation.md",
-            "guides/quickstart.md",
-            "guides/project_structure.md",
-        ],
-        "User Guide" => [
-            "guides/cpp_compilation.md",
-            "guides/binary_wrapping.md",
-            "guides/cmake_import.md",
-            "guides/daemon_system.md",
-            "guides/testing_validation.md",
-        ],
-        "API Reference" => [
-            "api/jmake.md",
-            "api/llvm_environment.md",
-            "api/configuration_manager.md",
-            "api/discovery.md",
-            "api/astwalker.md",
-            "api/cmake_parser.md",
-            "api/llvmake.md",
-            "api/juliawrapitup.md",
-            "api/build_bridge.md",
-            "api/error_learning.md",
-        ],
-        "Examples" => [
-            "examples/basic_cpp.md",
-            "examples/cmake_project.md",
-            "examples/wrapper_generation.md",
-            "examples/error_learning.md",
-        ],
-        "Architecture" => [
-            "architecture/overview.md",
-            "architecture/daemon_architecture.md",
-            "architecture/job_queue.md",
-        ],
+        "Modules" => [
+            "LLVMEnvironment" => "LLVMEnvironment.md",
+            "ConfigurationManager" => "ConfigurationManager.md",
+            "ASTWalker" => "ASTWalker.md",
+            "Discovery" => "Discovery.md",
+            "ErrorLearning" => "ErrorLearning.md",
+            "BuildBridge" => "BuildBridge.md",
+            "CMakeParser" => "CMakeParser.md",
+            "LLVMake" => "LLVMake.md",
+            "JuliaWrapItUp" => "JuliaWrapItUp.md",
+            "ClangJLBridge" => "ClangJLBridge.md",
+            "DaemonManager" => "DaemonManager.md",
+        ]
     ],
-    checkdocs = :none,
-    warnonly = [:missing_docs, :cross_references, :docs_block],
+    checkdocs = :none
 )
 
-# Deploy documentation to gh-pages branch
 deploydocs(
-    repo = "github.com/yourusername/JMake.jl.git",
-    devbranch = "main",
+    repo = "github.com/obsidianjulua/JMake.jl.git", # Replace with your repository URL
+    devbranch = "main", # Or "master"
 )

@@ -22,6 +22,9 @@ function get_jmake_llvm_root()
     return joinpath(jmake_dir, "LLVM")
 end
 
+# Define constant for use in configuration generation
+const JMAKE_LLVM_ROOT = get_jmake_llvm_root()
+
 """
 File scan results
 """
